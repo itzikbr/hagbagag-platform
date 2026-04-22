@@ -1,23 +1,141 @@
 import { useState, useRef, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { getChatById, getContact, CURRENT_USER_ID } from '../data/mockData'
-import { Message } from '../types'
+import { supabase } from '../lib/supabase'
+import { useAuth } from '../hooks/useAuth'
+import { DBMessage } from '../types'
 import Avatar from '../components/Avatar'
 
-export default function ChatConversation() {
-  const { id } = useParams<{ id: string }>()
-  const navigate = useNavigate()
-  const chat = id ? getChatById(id) : undefined
+interface GroupInfo {
+  id: string
+  name: string
+  type: 'direct' | 'group'
+  memberCount: number
+}
 
-  const [messages, setMessages] = useState<Message[]>(chat?.messages ?? [])
+export default function ChatConversation() {
+  const { id: groupId } = useParams<{ id: string }>()
+  const navigate = useNavigate()
+  const { user, profile } = useAuth()
+
+  const [groupInfo, setGroupInfo] = useState<GroupInfo | null>(null)
+  const [messages, setMessages] = useState<DBMessage[]>([])
   const [text, setText] = useState('')
+  const [loading, setLoading] = useState(true)
   const bottomRef = useRef<HTMLDivElement>(null)
 
+  // Scroll to bottom when messages change
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  if (!chat) {
+  // Load group info + messages + subscribe to realtime
+  useEffect(() => {
+    if (!groupId || !user) return
+    loadGroupAndMessages()
+
+    const channel = supabase
+      .channel(`group-${groupId}`)
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'messages',
+        filter: `group_id=eq.${groupId}`,
+      }, (payload) => {
+        setMessages(prev => {
+          // Avoid duplicates
+          const newMsg = payload.new as DBMessage
+          if (prev.some(m => m.id === newMsg.id)) return prev
+          return [...prev, newMsg]
+        })
+      })
+      .subscribe()
+
+    return () => { supabase.removeChannel(channel) }
+  }, [groupId, user?.id])
+
+  async function loadGroupAndMessages() {
+    if (!groupId) return
+    setLoading(true)
+    try {
+      // Group info
+      const { data: gData } = await supabase
+        .from('groups')
+        .select('id, name, type')
+        .eq('id', groupId)
+        .single()
+
+      // Member count
+      const { count } = await supabase
+        .from('group_members')
+        .select('*', { count: 'exact', head: true })
+        .eq('group_id', groupId)
+        .is('left_at', null)
+
+      if (gData) {
+        setGroupInfo({
+          id: gData.id,
+          name: gData.name,
+          type: gData.type as 'direct' | 'group',
+          memberCount: count ?? 0,
+        })
+      }
+
+      // Messages
+      const { data: msgs } = await supabase
+        .from('messages')
+        .select('*')
+        .eq('group_id', groupId)
+        .eq('is_deleted', false)
+        .order('created_at', { ascending: true })
+        .limit(100)
+
+      setMessages((msgs ?? []) as DBMessage[])
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleSend = async () => {
+    if (!text.trim() || !groupId || !user || !profile) return
+    const content = text.trim()
+    setText('')
+
+    const { error } = await supabase.from('messages').insert({
+      group_id: groupId,
+      sender_id: user.id,
+      sender_name: profile.full_name,
+      content,
+      message_type: 'text',
+    })
+
+    if (error) {
+      console.error('שגיאה בשליחת הודעה:', error)
+      setText(content) // Restore on error
+    }
+    // Realtime subscription will add the new message automatically
+  }
+
+  // Group messages by date
+  const grouped = messages.reduce<{ date: string; msgs: DBMessage[] }[]>((acc, msg) => {
+    const date = msg.created_at.slice(0, 10)
+    const last = acc[acc.length - 1]
+    if (last && last.date === date) {
+      last.msgs.push(msg)
+    } else {
+      acc.push({ date, msgs: [msg] })
+    }
+    return acc
+  }, [])
+
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
+        <span style={{ color: '#8696A0' }}>טוען...</span>
+      </div>
+    )
+  }
+
+  if (!groupInfo) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
         <span>שיחה לא נמצאה</span>
@@ -25,57 +143,11 @@ export default function ChatConversation() {
     )
   }
 
-  const isGroup = chat.type === 'group'
-  const otherParticipantId = !isGroup ? chat.participants.find(p => p !== CURRENT_USER_ID) : undefined
-  const contact = otherParticipantId ? getContact(otherParticipantId) : undefined
-
-  const handleSend = () => {
-    if (!text.trim()) return
-    const newMsg: Message = {
-      id: `m${Date.now()}`,
-      senderId: CURRENT_USER_ID,
-      text: text.trim(),
-      timestamp: new Date().toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' }),
-      date: new Date().toISOString().slice(0, 10),
-      read: false,
-      type: 'text',
-    }
-    setMessages(prev => [...prev, newMsg])
-    setText('')
-
-    // Auto-reply from Claude
-    if (chat.isAI) {
-      setTimeout(() => {
-        const reply: Message = {
-          id: `m${Date.now() + 1}`,
-          senderId: 'claude',
-          text: getClaudeReply(text.trim()),
-          timestamp: new Date().toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' }),
-          date: new Date().toISOString().slice(0, 10),
-          read: false,
-          type: 'text',
-        }
-        setMessages(prev => [...prev, reply])
-      }, 800)
-    }
-  }
-
-  // Group messages by date
-  const groupedMessages = messages.reduce<{ date: string; msgs: Message[] }[]>((acc, msg) => {
-    const last = acc[acc.length - 1]
-    if (last && last.date === msg.date) {
-      last.msgs.push(msg)
-    } else {
-      acc.push({ date: msg.date, msgs: [msg] })
-    }
-    return acc
-  }, [])
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#ECE5DD' }}>
       {/* Header */}
       <div style={{
-        background: chat.isAI ? '#1a0a0a' : '#CC0000',
+        background: '#CC0000',
         padding: '8px 12px',
         display: 'flex',
         alignItems: 'center',
@@ -91,12 +163,14 @@ export default function ChatConversation() {
           </svg>
         </button>
 
-        <Avatar contact={contact} name={chat.name} size={40} isGroup={isGroup} />
+        <Avatar name={groupInfo.name} size={40} isGroup={groupInfo.type === 'group'} />
 
         <div style={{ flex: 1 }}>
-          <div style={{ color: '#fff', fontWeight: 600, fontSize: 16 }}>{chat.name}</div>
+          <div style={{ color: '#fff', fontWeight: 600, fontSize: 16 }}>{groupInfo.name}</div>
           <div style={{ color: 'rgba(255,255,255,0.7)', fontSize: 12 }}>
-            {chat.isAI ? 'עוזר דיגיטלי של חג בגג' : isGroup ? `${chat.participants.length} משתתפים` : 'מחובר'}
+            {groupInfo.type === 'group'
+              ? `${groupInfo.memberCount} משתתפים`
+              : 'מחובר'}
           </div>
         </div>
 
@@ -111,24 +185,35 @@ export default function ChatConversation() {
 
       {/* Messages */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '8px 12px' }} className="no-scrollbar">
-        {groupedMessages.map(({ date, msgs }) => (
+        {grouped.map(({ date, msgs }) => (
           <div key={date}>
             {/* Date separator */}
             <div style={{ display: 'flex', justifyContent: 'center', margin: '8px 0' }}>
               <span style={{
-                background: 'rgba(255,255,255,0.85)',
-                borderRadius: 6,
-                padding: '3px 10px',
-                fontSize: 12,
-                color: '#54656F',
+                background: 'rgba(255,255,255,0.85)', borderRadius: 6,
+                padding: '3px 10px', fontSize: 12, color: '#54656F',
               }}>
                 {formatDate(date)}
               </span>
             </div>
 
             {msgs.map(msg => {
-              const isMine = msg.senderId === CURRENT_USER_ID
-              const sender = !isMine ? getContact(msg.senderId) : undefined
+              const isMine = msg.sender_id === user?.id
+              const isAI = msg.message_type === 'ai'
+              const isSystem = msg.message_type === 'system'
+
+              if (isSystem) {
+                return (
+                  <div key={msg.id} style={{ display: 'flex', justifyContent: 'center', margin: '4px 0' }}>
+                    <span style={{
+                      background: 'rgba(255,255,255,0.85)', borderRadius: 8,
+                      padding: '3px 12px', fontSize: 12, color: '#54656F',
+                    }}>
+                      {msg.content}
+                    </span>
+                  </div>
+                )
+              }
 
               return (
                 <div
@@ -141,29 +226,30 @@ export default function ChatConversation() {
                 >
                   <div style={{
                     maxWidth: '75%',
-                    background: msg.senderId === 'claude' ? '#1a0a0a' : isMine ? '#DCF8C6' : '#fff',
+                    background: isAI
+                      ? '#EDE7FF'
+                      : isMine ? '#DCF8C6' : '#fff',
                     borderRadius: isMine ? '12px 12px 0 12px' : '12px 12px 12px 0',
                     padding: '6px 8px 4px',
                     boxShadow: '0 1px 2px rgba(0,0,0,0.1)',
-                    position: 'relative',
-                    border: msg.senderId === 'claude' ? '1px solid #CC0000' : 'none',
+                    border: isAI ? '1px solid #9C27B0' : 'none',
                   }}>
-                    {/* Sender name in group */}
-                    {isGroup && !isMine && sender && (
-                      <div style={{ fontSize: 12, fontWeight: 600, color: sender.avatarColor ?? '#CC0000', marginBottom: 2 }}>
-                        {sender.name}
+                    {/* Sender name in group (not mine) */}
+                    {groupInfo.type === 'group' && !isMine && (
+                      <div style={{ fontSize: 12, fontWeight: 600, color: isAI ? '#9C27B0' : '#CC0000', marginBottom: 2 }}>
+                        {isAI ? '🤖 ' : ''}{msg.sender_name}
                       </div>
                     )}
 
-                    <span style={{ fontSize: 14, color: msg.senderId === 'claude' ? '#fff' : '#111', lineHeight: 1.4, wordBreak: 'break-word' }}>
-                      {msg.text}
+                    <span style={{ fontSize: 14, color: '#111', lineHeight: 1.4, wordBreak: 'break-word' }}>
+                      {msg.content}
                     </span>
 
                     <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 3, marginTop: 2 }}>
-                      <span style={{ fontSize: 11, color: '#8696A0' }}>{msg.timestamp}</span>
-                      {isMine && (
-                        <span style={{ fontSize: 12, color: msg.read ? '#53BDEB' : '#8696A0' }}>✓✓</span>
-                      )}
+                      <span style={{ fontSize: 11, color: '#8696A0' }}>
+                        {new Date(msg.created_at).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                      {isMine && <span style={{ fontSize: 12, color: '#8696A0' }}>✓✓</span>}
                     </div>
                   </div>
                 </div>
@@ -176,12 +262,8 @@ export default function ChatConversation() {
 
       {/* Input bar */}
       <div style={{
-        background: '#F0F2F5',
-        padding: '8px 12px',
-        display: 'flex',
-        alignItems: 'center',
-        gap: 8,
-        flexShrink: 0,
+        background: '#F0F2F5', padding: '8px 12px',
+        display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0,
       }}>
         <button style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
@@ -193,12 +275,8 @@ export default function ChatConversation() {
         </button>
 
         <div style={{
-          flex: 1,
-          background: '#fff',
-          borderRadius: 20,
-          padding: '8px 14px',
-          display: 'flex',
-          alignItems: 'center',
+          flex: 1, background: '#fff', borderRadius: 20,
+          padding: '8px 14px', display: 'flex', alignItems: 'center',
         }}>
           <input
             type="text"
@@ -207,13 +285,8 @@ export default function ChatConversation() {
             onChange={e => setText(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && handleSend()}
             style={{
-              border: 'none',
-              outline: 'none',
-              fontSize: 15,
-              width: '100%',
-              direction: 'rtl',
-              background: 'none',
-              color: '#111',
+              border: 'none', outline: 'none', fontSize: 15,
+              width: '100%', direction: 'rtl', background: 'none', color: '#111',
             }}
           />
         </div>
@@ -221,16 +294,9 @@ export default function ChatConversation() {
         <button
           onClick={text.trim() ? handleSend : undefined}
           style={{
-            width: 44,
-            height: 44,
-            borderRadius: '50%',
-            background: '#CC0000',
-            border: 'none',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            flexShrink: 0,
+            width: 44, height: 44, borderRadius: '50%',
+            background: '#CC0000', border: 'none', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
           }}
         >
           {text.trim() ? (
@@ -256,20 +322,4 @@ function formatDate(dateStr: string): string {
   const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10)
   if (dateStr === yesterday) return 'אתמול'
   return new Date(dateStr).toLocaleDateString('he-IL', { day: 'numeric', month: 'long' })
-}
-
-const claudeReplies = [
-  'אני כאן! מה אתה צריך?',
-  'בטח, אבדוק את זה.',
-  'הבנתי. רגע בודק...',
-  'כן, יש לי את המידע. מה תרצה לדעת?',
-  'נשמע טוב. איך אפשר לעזור?',
-  'בסדר גמור! מה השלב הבא?',
-]
-
-function getClaudeReply(input: string): string {
-  if (input.includes('שלום') || input.includes('היי')) return 'שלום! במה אוכל לעזור היום?'
-  if (input.includes('תודה')) return 'בשמחה! תמיד כאן בשבילך 😊'
-  if (input.includes('פרויקט')) return 'לגבי הפרויקט — תוכל לפרט יותר? אשמח לעזור.'
-  return claudeReplies[Math.floor(Math.random() * claudeReplies.length)]
 }

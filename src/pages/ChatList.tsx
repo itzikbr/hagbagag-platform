@@ -1,21 +1,119 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { chats } from '../data/mockData'
-import { Chat } from '../types'
+import { supabase } from '../lib/supabase'
+import { useAuth } from '../hooks/useAuth'
 import Avatar from '../components/Avatar'
-import { getContact } from '../data/mockData'
+
+interface GroupRow {
+  id: string
+  name: string
+  type: 'direct' | 'group'
+  avatar_url: string | null
+  updated_at: string
+  lastMessage?: string
+  lastMessageTime?: string
+  unreadCount: number
+}
 
 export default function ChatList() {
+  const [groups, setGroups] = useState<GroupRow[]>([])
+  const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const navigate = useNavigate()
+  const userId = useAuth(s => s.user?.id)
 
-  const filtered = chats.filter(c =>
-    c.name.toLowerCase().includes(search.toLowerCase()) ||
-    c.lastMessage.toLowerCase().includes(search.toLowerCase())
+  useEffect(() => {
+    if (!userId) return
+    loadGroups()
+
+    // Realtime — refresh when a new message arrives in any group
+    const channel = supabase
+      .channel('chatlist-messages')
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'messages',
+      }, () => {
+        loadGroups()
+      })
+      .subscribe()
+
+    return () => { supabase.removeChannel(channel) }
+  }, [userId])
+
+  async function loadGroups() {
+    if (!userId) return
+    try {
+      // 1. Get group IDs the user belongs to
+      const { data: memberOf, error: memberErr } = await supabase
+        .from('group_members')
+        .select('group_id')
+        .eq('user_id', userId)
+        .is('left_at', null)
+
+      if (memberErr) { console.error(memberErr); return }
+      if (!memberOf || memberOf.length === 0) {
+        setGroups([])
+        setLoading(false)
+        return
+      }
+
+      const groupIds = memberOf.map(m => m.group_id)
+
+      // 2. Get groups data
+      const { data: groupsData, error: groupsErr } = await supabase
+        .from('groups')
+        .select('id, name, type, avatar_url, updated_at')
+        .in('id', groupIds)
+        .order('updated_at', { ascending: false })
+
+      if (groupsErr) { console.error(groupsErr); return }
+
+      // 3. Get last message for each group
+      const { data: allMessages } = await supabase
+        .from('messages')
+        .select('group_id, content, sender_name, created_at, message_type')
+        .in('group_id', groupIds)
+        .eq('is_deleted', false)
+        .order('created_at', { ascending: false })
+
+      // Build a map: group_id → last message
+      const lastMsgMap: Record<string, { content: string; created_at: string }> = {}
+      if (allMessages) {
+        for (const msg of allMessages) {
+          if (!lastMsgMap[msg.group_id]) {
+            lastMsgMap[msg.group_id] = {
+              content: msg.content ?? (msg.message_type !== 'text' ? `📎 ${msg.message_type}` : ''),
+              created_at: msg.created_at,
+            }
+          }
+        }
+      }
+
+      const rows: GroupRow[] = (groupsData ?? []).map(g => {
+        const lm = lastMsgMap[g.id]
+        return {
+          id: g.id,
+          name: g.name,
+          type: g.type as 'direct' | 'group',
+          avatar_url: g.avatar_url,
+          updated_at: g.updated_at,
+          lastMessage: lm?.content ?? 'עדיין אין הודעות',
+          lastMessageTime: lm ? formatTime(lm.created_at) : '',
+          unreadCount: 0, // TODO: compute unread from message_reads
+        }
+      })
+
+      setGroups(rows)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const filtered = groups.filter(g =>
+    g.name.toLowerCase().includes(search.toLowerCase()) ||
+    (g.lastMessage ?? '').toLowerCase().includes(search.toLowerCase())
   )
-
-  const pinned = filtered.filter(c => c.isPinned)
-  const rest = filtered.filter(c => !c.isPinned)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
@@ -40,11 +138,13 @@ export default function ChatList() {
               <line x1="12" y1="6" x2="12" y2="14" stroke="#CC0000" strokeWidth="1.5"/>
             </svg>
           </button>
-          <button style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
+          <button
+            onClick={() => navigate('/contacts')}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}
+          >
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-              <circle cx="5" cy="12" r="2" fill="rgba(255,255,255,0.8)"/>
-              <circle cx="12" cy="12" r="2" fill="rgba(255,255,255,0.8)"/>
-              <circle cx="19" cy="12" r="2" fill="rgba(255,255,255,0.8)"/>
+              <circle cx="12" cy="8" r="4" stroke="rgba(255,255,255,0.8)" strokeWidth="2"/>
+              <path d="M4 20C4 17 7.6 15 12 15C16.4 15 20 17 20 20" stroke="rgba(255,255,255,0.8)" strokeWidth="2" strokeLinecap="round"/>
             </svg>
           </button>
         </div>
@@ -70,35 +170,31 @@ export default function ChatList() {
             value={search}
             onChange={e => setSearch(e.target.value)}
             style={{
-              border: 'none',
-              background: 'none',
-              outline: 'none',
-              fontSize: 15,
-              color: '#111',
-              width: '100%',
-              direction: 'rtl',
+              border: 'none', background: 'none', outline: 'none',
+              fontSize: 15, color: '#111', width: '100%', direction: 'rtl',
             }}
           />
         </div>
       </div>
 
-      {/* Chat list */}
+      {/* Group list */}
       <div style={{ flex: 1, overflowY: 'auto', background: '#fff' }} className="no-scrollbar">
-        {/* Pinned */}
-        {pinned.map(chat => (
-          <ChatItem key={chat.id} chat={chat} onClick={() => navigate(`/chat/${chat.id}`)} />
-        ))}
-
-        {/* Divider */}
-        {pinned.length > 0 && rest.length > 0 && (
-          <div style={{ padding: '4px 16px', background: '#F0F2F5' }}>
-            <span style={{ fontSize: 12, color: '#8696A0' }}>שיחות</span>
+        {loading && (
+          <div style={{ padding: 24, textAlign: 'center', color: '#8696A0' }}>
+            טוען שיחות...
           </div>
         )}
-
-        {/* Rest */}
-        {rest.map(chat => (
-          <ChatItem key={chat.id} chat={chat} onClick={() => navigate(`/chat/${chat.id}`)} />
+        {!loading && filtered.length === 0 && (
+          <div style={{ padding: 24, textAlign: 'center', color: '#8696A0' }}>
+            אין שיחות עדיין. לחץ + כדי ליצור קבוצה.
+          </div>
+        )}
+        {filtered.map(group => (
+          <GroupItem
+            key={group.id}
+            group={group}
+            onClick={() => navigate(`/chat/${group.id}`)}
+          />
         ))}
       </div>
 
@@ -106,20 +202,11 @@ export default function ChatList() {
       <button
         onClick={() => navigate('/new-chat')}
         style={{
-          position: 'absolute',
-          bottom: 72,
-          left: 16,
-          width: 56,
-          height: 56,
-          borderRadius: '50%',
-          background: '#CC0000',
-          border: 'none',
-          cursor: 'pointer',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-          zIndex: 10,
+          position: 'absolute', bottom: 72, left: 16,
+          width: 56, height: 56, borderRadius: '50%',
+          background: '#CC0000', border: 'none', cursor: 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.3)', zIndex: 10,
         }}
       >
         <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
@@ -132,88 +219,53 @@ export default function ChatList() {
   )
 }
 
-function ChatItem({ chat, onClick }: { chat: Chat; onClick: () => void }) {
-  const isGroup = chat.type === 'group'
-  const otherParticipantId = !isGroup ? chat.participants.find(id => id !== 'itzik') : undefined
-  const contact = otherParticipantId ? getContact(otherParticipantId) : undefined
-
+function GroupItem({ group, onClick }: { group: GroupRow; onClick: () => void }) {
   return (
     <div
       onClick={onClick}
       style={{
-        display: 'flex',
-        alignItems: 'center',
-        padding: '10px 16px',
-        gap: 12,
-        cursor: 'pointer',
-        borderBottom: '1px solid #F0F2F5',
-        background: chat.isAI ? '#FFF5F5' : '#fff',
-        userSelect: 'none',
+        display: 'flex', alignItems: 'center', padding: '10px 16px',
+        gap: 12, cursor: 'pointer', borderBottom: '1px solid #F0F2F5',
+        background: '#fff', userSelect: 'none',
       }}
     >
-      {/* Avatar */}
-      <div style={{ position: 'relative' }}>
-        <Avatar
-          contact={contact}
-          name={chat.name}
-          size={50}
-          isGroup={isGroup}
-        />
-        {chat.isPinned && (
-          <div style={{
-            position: 'absolute',
-            bottom: -2,
-            left: -2,
-            width: 18,
-            height: 18,
-            borderRadius: '50%',
-            background: '#1a0a0a',
-            border: '1px solid #CC0000',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            border: '2px solid #fff',
-          }}>
-            <span style={{ fontSize: 8, color: '#CC0000' }}>✦</span>
-          </div>
-        )}
-      </div>
-
-      {/* Content */}
+      <Avatar name={group.name} size={50} isGroup={group.type === 'group'} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
-          <span style={{ fontWeight: 600, fontSize: 16, color: '#111' }}>{chat.name}</span>
-          <span style={{ fontSize: 12, color: chat.unreadCount > 0 ? '#CC0000' : '#8696A0' }}>
-            {chat.lastMessageTime}
+          <span style={{ fontWeight: 600, fontSize: 16, color: '#111' }}>{group.name}</span>
+          <span style={{ fontSize: 12, color: group.unreadCount > 0 ? '#CC0000' : '#8696A0' }}>
+            {group.lastMessageTime}
           </span>
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span style={{
-            fontSize: 14,
-            color: '#8696A0',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-            maxWidth: '200px',
+            fontSize: 14, color: '#8696A0',
+            overflow: 'hidden', textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap', maxWidth: '200px',
           }}>
-            {chat.lastMessage}
+            {group.lastMessage}
           </span>
-          {chat.unreadCount > 0 && (
+          {group.unreadCount > 0 && (
             <div style={{
-              minWidth: 20,
-              height: 20,
-              borderRadius: 10,
-              background: '#CC0000',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: '0 6px',
+              minWidth: 20, height: 20, borderRadius: 10,
+              background: '#CC0000', display: 'flex',
+              alignItems: 'center', justifyContent: 'center', padding: '0 6px',
             }}>
-              <span style={{ fontSize: 12, color: '#fff', fontWeight: 600 }}>{chat.unreadCount}</span>
+              <span style={{ fontSize: 12, color: '#fff', fontWeight: 600 }}>{group.unreadCount}</span>
             </div>
           )}
         </div>
       </div>
     </div>
   )
+}
+
+function formatTime(isoStr: string): string {
+  const d = new Date(isoStr)
+  const today = new Date()
+  const isToday = d.toDateString() === today.toDateString()
+  if (isToday) {
+    return d.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })
+  }
+  return d.toLocaleDateString('he-IL', { day: 'numeric', month: 'numeric' })
 }
