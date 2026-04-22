@@ -1,67 +1,108 @@
 import { useState, useRef, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { getChatById, getContact, CURRENT_USER_ID } from '../data/mockData'
-import { Message } from '../types'
+import { supabase } from '../lib/supabase'
+import { useAuth } from '../hooks/useAuth'
 import Avatar from '../components/Avatar'
+
+interface DBMessage {
+  id: string
+  group_id: string
+  sender_id: string
+  content: string
+  created_at: string
+}
+
+interface DisplayMessage {
+  id: string
+  senderId: string
+  text: string
+  timestamp: string
+  date: string
+}
+
+interface GroupInfo {
+  id: string
+  name: string
+  type: 'direct' | 'group'
+}
+
+function toDisplay(msg: DBMessage): DisplayMessage {
+  return {
+    id: msg.id,
+    senderId: msg.sender_id,
+    text: msg.content,
+    timestamp: new Date(msg.created_at).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' }),
+    date: msg.created_at.slice(0, 10),
+  }
+}
 
 export default function ChatConversation() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
-  const chat = id ? getChatById(id) : undefined
+  const { user } = useAuth()
 
-  const [messages, setMessages] = useState<Message[]>(chat?.messages ?? [])
+  const [group, setGroup] = useState<GroupInfo | null>(null)
+  const [messages, setMessages] = useState<DisplayMessage[]>([])
   const [text, setText] = useState('')
+  const [loading, setLoading] = useState(true)
   const bottomRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!id || !user) return
+
+    loadGroup()
+    loadMessages()
+
+    const channel = supabase
+      .channel(`messages-${id}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'messages', filter: `group_id=eq.${id}` },
+        (payload) => {
+          setMessages(prev => [...prev, toDisplay(payload.new as DBMessage)])
+        }
+      )
+      .subscribe()
+
+    return () => { supabase.removeChannel(channel) }
+  }, [id, user])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  if (!chat) {
-    return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
-        <span>שיחה לא נמצאה</span>
-      </div>
-    )
+  async function loadGroup() {
+    const { data } = await supabase
+      .from('groups')
+      .select('id, name, type')
+      .eq('id', id)
+      .single()
+    if (data) setGroup(data as GroupInfo)
   }
 
-  const isGroup = chat.type === 'group'
-  const otherParticipantId = !isGroup ? chat.participants.find(p => p !== CURRENT_USER_ID) : undefined
-  const contact = otherParticipantId ? getContact(otherParticipantId) : undefined
+  async function loadMessages() {
+    setLoading(true)
+    const { data } = await supabase
+      .from('messages')
+      .select('id, group_id, sender_id, content, created_at')
+      .eq('group_id', id)
+      .order('created_at', { ascending: true })
+    setMessages((data ?? []).map(toDisplay))
+    setLoading(false)
+  }
 
-  const handleSend = () => {
-    if (!text.trim()) return
-    const newMsg: Message = {
-      id: `m${Date.now()}`,
-      senderId: CURRENT_USER_ID,
-      text: text.trim(),
-      timestamp: new Date().toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' }),
-      date: new Date().toISOString().slice(0, 10),
-      read: false,
-      type: 'text',
-    }
-    setMessages(prev => [...prev, newMsg])
+  async function handleSend() {
+    if (!text.trim() || !user || !id) return
+    const content = text.trim()
     setText('')
-
-    // Auto-reply from Claude
-    if (chat.isAI) {
-      setTimeout(() => {
-        const reply: Message = {
-          id: `m${Date.now() + 1}`,
-          senderId: 'claude',
-          text: getClaudeReply(text.trim()),
-          timestamp: new Date().toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' }),
-          date: new Date().toISOString().slice(0, 10),
-          read: false,
-          type: 'text',
-        }
-        setMessages(prev => [...prev, reply])
-      }, 800)
-    }
+    await supabase.from('messages').insert({
+      group_id: id,
+      sender_id: user.id,
+      content,
+    })
   }
 
-  // Group messages by date
-  const groupedMessages = messages.reduce<{ date: string; msgs: Message[] }[]>((acc, msg) => {
+  const groupedMessages = messages.reduce<{ date: string; msgs: DisplayMessage[] }[]>((acc, msg) => {
     const last = acc[acc.length - 1]
     if (last && last.date === msg.date) {
       last.msgs.push(msg)
@@ -75,7 +116,7 @@ export default function ChatConversation() {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#ECE5DD' }}>
       {/* Header */}
       <div style={{
-        background: chat.isAI ? '#1a0a0a' : '#CC0000',
+        background: '#CC0000',
         padding: '8px 12px',
         display: 'flex',
         alignItems: 'center',
@@ -84,19 +125,19 @@ export default function ChatConversation() {
       }}>
         <button
           onClick={() => navigate('/chats')}
-          style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, color: '#fff' }}
+          style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}
         >
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
             <path d="M15 18L9 12L15 6" stroke="#fff" strokeWidth="2.5" strokeLinecap="round"/>
           </svg>
         </button>
 
-        <Avatar contact={contact} name={chat.name} size={40} isGroup={isGroup} />
+        <Avatar name={group?.name ?? '...'} size={40} isGroup={group?.type === 'group'} />
 
         <div style={{ flex: 1 }}>
-          <div style={{ color: '#fff', fontWeight: 600, fontSize: 16 }}>{chat.name}</div>
+          <div style={{ color: '#fff', fontWeight: 600, fontSize: 16 }}>{group?.name ?? '...'}</div>
           <div style={{ color: 'rgba(255,255,255,0.7)', fontSize: 12 }}>
-            {chat.isAI ? 'עוזר דיגיטלי של חג בגג' : isGroup ? `${chat.participants.length} משתתפים` : 'מחובר'}
+            {group?.type === 'group' ? 'קבוצה' : 'שיחה ישירה'}
           </div>
         </div>
 
@@ -111,9 +152,20 @@ export default function ChatConversation() {
 
       {/* Messages */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '8px 12px' }} className="no-scrollbar">
+        {loading && (
+          <div style={{ display: 'flex', justifyContent: 'center', padding: 32 }}>
+            <div style={{
+              width: 28, height: 28,
+              border: '3px solid rgba(255,255,255,0.4)',
+              borderTopColor: '#CC0000',
+              borderRadius: '50%',
+              animation: 'spin 0.7s linear infinite',
+            }} />
+          </div>
+        )}
+
         {groupedMessages.map(({ date, msgs }) => (
           <div key={date}>
-            {/* Date separator */}
             <div style={{ display: 'flex', justifyContent: 'center', margin: '8px 0' }}>
               <span style={{
                 background: 'rgba(255,255,255,0.85)',
@@ -127,9 +179,7 @@ export default function ChatConversation() {
             </div>
 
             {msgs.map(msg => {
-              const isMine = msg.senderId === CURRENT_USER_ID
-              const sender = !isMine ? getContact(msg.senderId) : undefined
-
+              const isMine = msg.senderId === user?.id
               return (
                 <div
                   key={msg.id}
@@ -141,29 +191,17 @@ export default function ChatConversation() {
                 >
                   <div style={{
                     maxWidth: '75%',
-                    background: msg.senderId === 'claude' ? '#1a0a0a' : isMine ? '#DCF8C6' : '#fff',
+                    background: isMine ? '#DCF8C6' : '#fff',
                     borderRadius: isMine ? '12px 12px 0 12px' : '12px 12px 12px 0',
                     padding: '6px 8px 4px',
                     boxShadow: '0 1px 2px rgba(0,0,0,0.1)',
-                    position: 'relative',
-                    border: msg.senderId === 'claude' ? '1px solid #CC0000' : 'none',
                   }}>
-                    {/* Sender name in group */}
-                    {isGroup && !isMine && sender && (
-                      <div style={{ fontSize: 12, fontWeight: 600, color: sender.avatarColor ?? '#CC0000', marginBottom: 2 }}>
-                        {sender.name}
-                      </div>
-                    )}
-
-                    <span style={{ fontSize: 14, color: msg.senderId === 'claude' ? '#fff' : '#111', lineHeight: 1.4, wordBreak: 'break-word' }}>
+                    <span style={{ fontSize: 14, color: '#111', lineHeight: 1.4, wordBreak: 'break-word' }}>
                       {msg.text}
                     </span>
-
                     <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 3, marginTop: 2 }}>
                       <span style={{ fontSize: 11, color: '#8696A0' }}>{msg.timestamp}</span>
-                      {isMine && (
-                        <span style={{ fontSize: 12, color: msg.read ? '#53BDEB' : '#8696A0' }}>✓✓</span>
-                      )}
+                      {isMine && <span style={{ fontSize: 12, color: '#8696A0' }}>✓✓</span>}
                     </div>
                   </div>
                 </div>
@@ -183,15 +221,6 @@ export default function ChatConversation() {
         gap: 8,
         flexShrink: 0,
       }}>
-        <button style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-            <circle cx="12" cy="12" r="10" stroke="#8696A0" strokeWidth="1.5"/>
-            <path d="M8 13C8 13 9.5 15 12 15C14.5 15 16 13 16 13" stroke="#8696A0" strokeWidth="1.5" strokeLinecap="round"/>
-            <circle cx="9" cy="10" r="1" fill="#8696A0"/>
-            <circle cx="15" cy="10" r="1" fill="#8696A0"/>
-          </svg>
-        </button>
-
         <div style={{
           flex: 1,
           background: '#fff',
@@ -219,7 +248,7 @@ export default function ChatConversation() {
         </div>
 
         <button
-          onClick={text.trim() ? handleSend : undefined}
+          onClick={handleSend}
           style={{
             width: 44,
             height: 44,
@@ -233,17 +262,10 @@ export default function ChatConversation() {
             flexShrink: 0,
           }}
         >
-          {text.trim() ? (
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-              <path d="M22 2L11 13" stroke="#fff" strokeWidth="2" strokeLinecap="round"/>
-              <path d="M22 2L15 22L11 13L2 9L22 2Z" stroke="#fff" strokeWidth="2" strokeLinejoin="round"/>
-            </svg>
-          ) : (
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-              <path d="M12 1C10.34 1 9 2.34 9 4V12C9 13.66 10.34 15 12 15C13.66 15 15 13.66 15 12V4C15 2.34 13.66 1 12 1Z" fill="#fff"/>
-              <path d="M19 10V12C19 15.87 15.87 19 12 19C8.13 19 5 15.87 5 12V10H3V12C3 16.45 6.16 20.15 10.37 20.86L10 23H14L13.63 20.86C17.84 20.15 21 16.45 21 12V10H19Z" fill="#fff"/>
-            </svg>
-          )}
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+            <path d="M22 2L11 13" stroke="#fff" strokeWidth="2" strokeLinecap="round"/>
+            <path d="M22 2L15 22L11 13L2 9L22 2Z" stroke="#fff" strokeWidth="2" strokeLinejoin="round"/>
+          </svg>
         </button>
       </div>
     </div>
@@ -251,25 +273,10 @@ export default function ChatConversation() {
 }
 
 function formatDate(dateStr: string): string {
+  if (!dateStr) return ''
   const today = new Date().toISOString().slice(0, 10)
   if (dateStr === today) return 'היום'
   const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10)
   if (dateStr === yesterday) return 'אתמול'
   return new Date(dateStr).toLocaleDateString('he-IL', { day: 'numeric', month: 'long' })
-}
-
-const claudeReplies = [
-  'אני כאן! מה אתה צריך?',
-  'בטח, אבדוק את זה.',
-  'הבנתי. רגע בודק...',
-  'כן, יש לי את המידע. מה תרצה לדעת?',
-  'נשמע טוב. איך אפשר לעזור?',
-  'בסדר גמור! מה השלב הבא?',
-]
-
-function getClaudeReply(input: string): string {
-  if (input.includes('שלום') || input.includes('היי')) return 'שלום! במה אוכל לעזור היום?'
-  if (input.includes('תודה')) return 'בשמחה! תמיד כאן בשבילך 😊'
-  if (input.includes('פרויקט')) return 'לגבי הפרויקט — תוכל לפרט יותר? אשמח לעזור.'
-  return claudeReplies[Math.floor(Math.random() * claudeReplies.length)]
 }

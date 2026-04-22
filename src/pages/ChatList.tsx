@@ -1,21 +1,82 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { chats } from '../data/mockData'
-import { Chat } from '../types'
+import { supabase } from '../lib/supabase'
+import { useAuth } from '../hooks/useAuth'
 import Avatar from '../components/Avatar'
-import { getContact } from '../data/mockData'
+
+interface ChatDisplayItem {
+  id: string
+  name: string
+  type: 'direct' | 'group'
+  lastMessage: string
+  lastMessageTime: string
+}
 
 export default function ChatList() {
+  const [chats, setChats] = useState<ChatDisplayItem[]>([])
+  const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const { user } = useAuth()
   const navigate = useNavigate()
 
-  const filtered = chats.filter(c =>
-    c.name.toLowerCase().includes(search.toLowerCase()) ||
-    c.lastMessage.toLowerCase().includes(search.toLowerCase())
-  )
+  useEffect(() => {
+    if (!user) return
+    loadChats()
+  }, [user])
 
-  const pinned = filtered.filter(c => c.isPinned)
-  const rest = filtered.filter(c => !c.isPinned)
+  async function loadChats() {
+    setLoading(true)
+
+    const { data: memberships, error } = await supabase
+      .from('group_members')
+      .select('group_id, groups(id, name, type)')
+      .eq('user_id', user!.id)
+
+    if (error || !memberships) {
+      setLoading(false)
+      return
+    }
+
+    const groupIds = memberships.map((m: any) => m.group_id)
+
+    if (groupIds.length === 0) {
+      setChats([])
+      setLoading(false)
+      return
+    }
+
+    const { data: messages } = await supabase
+      .from('messages')
+      .select('group_id, content, created_at')
+      .in('group_id', groupIds)
+      .order('created_at', { ascending: false })
+
+    const lastMsgMap = new Map<string, { content: string; created_at: string }>()
+    for (const msg of messages ?? []) {
+      if (!lastMsgMap.has(msg.group_id)) {
+        lastMsgMap.set(msg.group_id, msg)
+      }
+    }
+
+    const items: ChatDisplayItem[] = memberships.map((m: any) => {
+      const group = m.groups as { id: string; name: string; type: 'direct' | 'group' }
+      const lastMsg = lastMsgMap.get(m.group_id)
+      return {
+        id: group.id,
+        name: group.name,
+        type: group.type,
+        lastMessage: lastMsg?.content ?? '',
+        lastMessageTime: lastMsg ? formatTime(lastMsg.created_at) : '',
+      }
+    })
+
+    setChats(items)
+    setLoading(false)
+  }
+
+  const filtered = chats.filter(c =>
+    c.name.includes(search) || c.lastMessage.includes(search)
+  )
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
@@ -84,22 +145,29 @@ export default function ChatList() {
 
       {/* Chat list */}
       <div style={{ flex: 1, overflowY: 'auto', background: '#fff' }} className="no-scrollbar">
-        {/* Pinned */}
-        {pinned.map(chat => (
-          <ChatItem key={chat.id} chat={chat} onClick={() => navigate(`/chat/${chat.id}`)} />
-        ))}
-
-        {/* Divider */}
-        {pinned.length > 0 && rest.length > 0 && (
-          <div style={{ padding: '4px 16px', background: '#F0F2F5' }}>
-            <span style={{ fontSize: 12, color: '#8696A0' }}>שיחות</span>
+        {loading ? (
+          <div style={{ display: 'flex', justifyContent: 'center', padding: 32 }}>
+            <div style={{
+              width: 28, height: 28,
+              border: '3px solid #F0F2F5',
+              borderTopColor: '#CC0000',
+              borderRadius: '50%',
+              animation: 'spin 0.7s linear infinite',
+            }} />
           </div>
+        ) : filtered.length === 0 ? (
+          <div style={{ textAlign: 'center', color: '#8696A0', padding: 32, direction: 'rtl' }}>
+            אין שיחות עדיין
+          </div>
+        ) : (
+          filtered.map(chat => (
+            <ChatListItem
+              key={chat.id}
+              chat={chat}
+              onClick={() => navigate(`/chat/${chat.id}`)}
+            />
+          ))
         )}
-
-        {/* Rest */}
-        {rest.map(chat => (
-          <ChatItem key={chat.id} chat={chat} onClick={() => navigate(`/chat/${chat.id}`)} />
-        ))}
       </div>
 
       {/* FAB */}
@@ -132,11 +200,7 @@ export default function ChatList() {
   )
 }
 
-function ChatItem({ chat, onClick }: { chat: Chat; onClick: () => void }) {
-  const isGroup = chat.type === 'group'
-  const otherParticipantId = !isGroup ? chat.participants.find(id => id !== 'itzik') : undefined
-  const contact = otherParticipantId ? getContact(otherParticipantId) : undefined
-
+function ChatListItem({ chat, onClick }: { chat: ChatDisplayItem; onClick: () => void }) {
   return (
     <div
       onClick={onClick}
@@ -147,73 +211,42 @@ function ChatItem({ chat, onClick }: { chat: Chat; onClick: () => void }) {
         gap: 12,
         cursor: 'pointer',
         borderBottom: '1px solid #F0F2F5',
-        background: chat.isAI ? '#FFF5F5' : '#fff',
+        background: '#fff',
         userSelect: 'none',
       }}
     >
-      {/* Avatar */}
-      <div style={{ position: 'relative' }}>
-        <Avatar
-          contact={contact}
-          name={chat.name}
-          size={50}
-          isGroup={isGroup}
-        />
-        {chat.isPinned && (
-          <div style={{
-            position: 'absolute',
-            bottom: -2,
-            left: -2,
-            width: 18,
-            height: 18,
-            borderRadius: '50%',
-            background: '#1a0a0a',
-            border: '1px solid #CC0000',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            border: '2px solid #fff',
-          }}>
-            <span style={{ fontSize: 8, color: '#CC0000' }}>✦</span>
-          </div>
-        )}
-      </div>
-
-      {/* Content */}
+      <Avatar name={chat.name} size={50} isGroup={chat.type === 'group'} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
           <span style={{ fontWeight: 600, fontSize: 16, color: '#111' }}>{chat.name}</span>
-          <span style={{ fontSize: 12, color: chat.unreadCount > 0 ? '#CC0000' : '#8696A0' }}>
-            {chat.lastMessageTime}
-          </span>
+          <span style={{ fontSize: 12, color: '#8696A0' }}>{chat.lastMessageTime}</span>
         </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span style={{
-            fontSize: 14,
-            color: '#8696A0',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-            maxWidth: '200px',
-          }}>
-            {chat.lastMessage}
-          </span>
-          {chat.unreadCount > 0 && (
-            <div style={{
-              minWidth: 20,
-              height: 20,
-              borderRadius: 10,
-              background: '#CC0000',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: '0 6px',
-            }}>
-              <span style={{ fontSize: 12, color: '#fff', fontWeight: 600 }}>{chat.unreadCount}</span>
-            </div>
-          )}
-        </div>
+        <span style={{
+          fontSize: 14,
+          color: '#8696A0',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+          display: 'block',
+        }}>
+          {chat.lastMessage}
+        </span>
       </div>
     </div>
   )
+}
+
+function formatTime(isoString: string): string {
+  const date = new Date(isoString)
+  const today = new Date()
+  const yesterday = new Date(today)
+  yesterday.setDate(yesterday.getDate() - 1)
+
+  if (date.toDateString() === today.toDateString()) {
+    return date.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })
+  }
+  if (date.toDateString() === yesterday.toDateString()) {
+    return 'אתמול'
+  }
+  return date.toLocaleDateString('he-IL', { day: 'numeric', month: 'numeric' })
 }

@@ -8,6 +8,8 @@ import ChatConversation from './pages/ChatConversation'
 import NewChat from './pages/NewChat'
 import NewGroup from './pages/NewGroup'
 import SheetsPlaceholder from './pages/SheetsPlaceholder'
+import Contacts from './pages/Contacts'
+import Admin from './pages/Admin'
 import BottomNav from './components/BottomNav'
 
 // ──────────────────────────────────────────────────────
@@ -68,8 +70,10 @@ function PlatformLayout() {
           <Route path="/chat/:id" element={<ChatConversation />} />
           <Route path="/new-chat"  element={<NewChat />} />
           <Route path="/new-group" element={<NewGroup />} />
-          <Route path="/sheets" element={<SheetsPlaceholder />} />
-          <Route path="*"       element={<Navigate to="/chats" replace />} />
+          <Route path="/sheets"   element={<SheetsPlaceholder />} />
+          <Route path="/contacts" element={<Contacts />} />
+          <Route path="/admin"    element={<Admin />} />
+          <Route path="*"         element={<Navigate to="/chats" replace />} />
         </Routes>
       </div>
       {!hideNav && <BottomNav activeTab={activeTab} onTabChange={setActiveTab} />}

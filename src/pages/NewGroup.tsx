@@ -1,24 +1,67 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { contacts } from '../data/mockData'
-import { Contact } from '../types'
+import { supabase } from '../lib/supabase'
+import { useAuth } from '../hooks/useAuth'
 import Avatar from '../components/Avatar'
+
+interface UserRow {
+  id: string
+  full_name: string
+  role: string
+}
 
 export default function NewGroup() {
   const navigate = useNavigate()
+  const { user } = useAuth()
+  const [users, setUsers] = useState<UserRow[]>([])
   const [selected, setSelected] = useState<string[]>([])
   const [search, setSearch] = useState('')
+  const [groupName, setGroupName] = useState('')
+  const [creating, setCreating] = useState(false)
 
-  const selectable = contacts.filter(c => c.id !== 'itzik' && c.id !== 'claude')
-  const filtered = selectable.filter(c => c.name.includes(search))
+  useEffect(() => {
+    if (!user) return
+    supabase
+      .from('users')
+      .select('id, full_name, role')
+      .neq('id', user.id)
+      .then(({ data }) => setUsers(data ?? []))
+  }, [user])
 
   const toggle = (id: string) => {
-    setSelected(prev =>
-      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
-    )
+    setSelected(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
   }
 
-  const selectedContacts = contacts.filter(c => selected.includes(c.id))
+  const filtered = users.filter(u =>
+    u.full_name.includes(search) || u.role.includes(search)
+  )
+
+  const selectedUsers = users.filter(u => selected.includes(u.id))
+
+  async function handleCreate() {
+    if (selected.length === 0 || !user) return
+    setCreating(true)
+
+    const name = groupName.trim() || selectedUsers.map(u => u.full_name).join(', ')
+
+    const { data: group, error } = await supabase
+      .from('groups')
+      .insert({ name, type: 'group' })
+      .select()
+      .single()
+
+    if (error || !group) {
+      setCreating(false)
+      return
+    }
+
+    await supabase.from('group_members').insert([
+      { group_id: group.id, user_id: user.id },
+      ...selected.map(uid => ({ group_id: group.id, user_id: uid })),
+    ])
+
+    navigate('/chats')
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#fff' }}>
@@ -42,39 +85,61 @@ export default function NewGroup() {
         </div>
         {selected.length > 0 && (
           <button
-            onClick={() => navigate('/chats')}
+            onClick={handleCreate}
+            disabled={creating}
             style={{
-              background: '#CC0000', border: 'none', borderRadius: '50%',
-              width: 44, height: 44, cursor: 'pointer', display: 'flex',
-              alignItems: 'center', justifyContent: 'center',
+              background: creating ? 'rgba(255,255,255,0.5)' : '#fff',
+              border: 'none',
+              borderRadius: 20,
+              padding: '8px 16px',
+              cursor: creating ? 'default' : 'pointer',
+              color: '#CC0000',
+              fontWeight: 700,
+              fontSize: 15,
             }}
           >
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-              <path d="M15 18L9 12L15 6" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" transform="rotate(180 12 12)"/>
-              <path d="M5 12H19" stroke="#fff" strokeWidth="2.5" strokeLinecap="round"/>
-            </svg>
+            {creating ? '...' : 'הבא'}
           </button>
         )}
       </div>
 
+      {/* Group name input — shown when at least one member selected */}
+      {selected.length > 0 && (
+        <div style={{ padding: '8px 12px', borderBottom: '1px solid #F0F2F5' }}>
+          <input
+            type="text"
+            placeholder="שם הקבוצה (אופציונלי)"
+            value={groupName}
+            onChange={e => setGroupName(e.target.value)}
+            style={{
+              width: '100%',
+              border: '1px solid #E0E0E0',
+              borderRadius: 8,
+              padding: '8px 12px',
+              fontSize: 15,
+              direction: 'rtl',
+              outline: 'none',
+              boxSizing: 'border-box',
+            }}
+          />
+        </div>
+      )}
+
       {/* Selected chips */}
-      {selectedContacts.length > 0 && (
+      {selectedUsers.length > 0 && (
         <div style={{
           display: 'flex', gap: 8, padding: '8px 12px',
           overflowX: 'auto', background: '#fff', borderBottom: '1px solid #F0F2F5',
           flexShrink: 0,
         }} className="no-scrollbar">
-          {selectedContacts.map((c: Contact) => (
+          {selectedUsers.map(u => (
             <div
-              key={c.id}
-              onClick={() => toggle(c.id)}
-              style={{
-                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
-                cursor: 'pointer', flexShrink: 0,
-              }}
+              key={u.id}
+              onClick={() => toggle(u.id)}
+              style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, cursor: 'pointer', flexShrink: 0 }}
             >
               <div style={{ position: 'relative' }}>
-                <Avatar contact={c} size={44} />
+                <Avatar name={u.full_name} size={44} />
                 <div style={{
                   position: 'absolute', top: -2, right: -2,
                   width: 18, height: 18, borderRadius: '50%',
@@ -85,7 +150,7 @@ export default function NewGroup() {
                 </div>
               </div>
               <span style={{ fontSize: 11, color: '#111', maxWidth: 48, textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {c.name}
+                {u.full_name}
               </span>
             </div>
           ))}
@@ -94,10 +159,7 @@ export default function NewGroup() {
 
       {/* Search */}
       <div style={{ padding: '8px 12px', background: '#fff', borderBottom: '1px solid #F0F2F5' }}>
-        <div style={{
-          background: '#F0F2F5', borderRadius: 8,
-          display: 'flex', alignItems: 'center', padding: '6px 12px', gap: 8,
-        }}>
+        <div style={{ background: '#F0F2F5', borderRadius: 8, display: 'flex', alignItems: 'center', padding: '6px 12px', gap: 8 }}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
             <circle cx="11" cy="11" r="8" stroke="#8696A0" strokeWidth="2"/>
             <path d="M21 21L16.65 16.65" stroke="#8696A0" strokeWidth="2"/>
@@ -112,22 +174,22 @@ export default function NewGroup() {
         </div>
       </div>
 
-      {/* Contact list */}
+      {/* User list */}
       <div style={{ flex: 1, overflowY: 'auto' }} className="no-scrollbar">
-        {filtered.map(contact => {
-          const isSelected = selected.includes(contact.id)
+        {filtered.map(u => {
+          const isSelected = selected.includes(u.id)
           return (
             <div
-              key={contact.id}
-              onClick={() => toggle(contact.id)}
+              key={u.id}
+              onClick={() => toggle(u.id)}
               style={{
                 display: 'flex', alignItems: 'center', padding: '10px 16px', gap: 14,
                 cursor: 'pointer', borderBottom: '1px solid #F0F2F5',
-                background: isSelected ? '#E8F5E9' : '#fff',
+                background: isSelected ? '#FFF5F5' : '#fff',
               }}
             >
               <div style={{ position: 'relative' }}>
-                <Avatar contact={contact} size={48} />
+                <Avatar name={u.full_name} size={48} />
                 {isSelected && (
                   <div style={{
                     position: 'absolute', bottom: 0, left: 0,
@@ -142,7 +204,8 @@ export default function NewGroup() {
                 )}
               </div>
               <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 16, fontWeight: 500, color: '#111' }}>{contact.name}</div>
+                <div style={{ fontSize: 16, fontWeight: 500, color: '#111' }}>{u.full_name}</div>
+                <div style={{ fontSize: 13, color: '#8696A0' }}>{u.role}</div>
               </div>
               <div style={{
                 width: 22, height: 22, borderRadius: '50%',

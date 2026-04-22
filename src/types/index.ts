@@ -1,4 +1,4 @@
-export type UserRole = 'admin' | 'office' | 'field' | 'external'
+export type UserRole = 'manager' | 'office' | 'field'
 
 export interface Contact {
   id: string

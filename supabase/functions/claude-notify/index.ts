@@ -12,7 +12,7 @@ const CLAUDE_API_KEY   = Deno.env.get('ANTHROPIC_API_KEY')!
 const SUPABASE_URL     = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_KEY     = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 const MANAGER_USER_ID  = Deno.env.get('MANAGER_USER_ID')!   // ה-UUID של איציק ב-Supabase Auth
-const CLAUDE_CONV_ID   = Deno.env.get('CLAUDE_CONVERSATION_ID')! // ה-UUID של שיחת קלוד-איציק
+const CLAUDE_GROUP_ID  = Deno.env.get('CLAUDE_GROUP_ID')! // ה-UUID של קבוצת קלוד-איציק
 
 type EventType =
   | 'new_sheet'
@@ -94,11 +94,9 @@ async function askClaude(userMessage: string): Promise<string> {
 // ============================================================
 async function saveClaudeMessage(supabase: ReturnType<typeof createClient>, text: string) {
   const { error } = await supabase.from('messages').insert({
-    conversation_id: CLAUDE_CONV_ID,
-    sender_id: null,           // null = קלוד (system sender)
-    sender_name: 'קלוד',
+    group_id: CLAUDE_GROUP_ID,
+    sender_id: null,
     content: text,
-    message_type: 'system',
   })
   if (error) console.error('Failed to save Claude message:', error)
 }
