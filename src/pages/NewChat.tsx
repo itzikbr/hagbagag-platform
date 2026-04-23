@@ -1,33 +1,105 @@
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { contacts, getContact } from '../data/mockData'
-import { Contact, UserRole } from '../types'
+import { supabase } from '../lib/supabase'
+import { useAuth } from '../hooks/useAuth'
+import { DBUser } from '../types'
 import Avatar from '../components/Avatar'
-import { useState } from 'react'
 
-const ROLE_LABELS: Record<UserRole, string> = {
-  admin: 'מנהל',
-  office: 'משרד',
-  field: 'שטח',
-  external: 'חיצוני',
+const ROLE_ORDER = ['admin', 'office', 'field_worker', 'external']
+
+function roleLabel(role: string): string {
+  switch (role) {
+    case 'admin':       return 'מנהל'
+    case 'office':      return 'משרד'
+    case 'field_worker': return 'שטח'
+    case 'external':    return 'חיצוני'
+    default:            return role
+  }
 }
-
-const ROLE_ORDER: UserRole[] = ['admin', 'office', 'field', 'external']
 
 export default function NewChat() {
   const navigate = useNavigate()
+  const { user } = useAuth()
+  const [contacts, setContacts] = useState<DBUser[]>([])
   const [search, setSearch] = useState('')
+  const [loading, setLoading] = useState(true)
 
-  const claude = getContact('claude')!
-  const others = contacts.filter(c => c.id !== 'itzik' && c.id !== 'claude')
+  useEffect(() => {
+    loadContacts()
+  }, [user?.id])
 
-  const filtered = others.filter(c =>
-    c.name.includes(search) || ROLE_LABELS[c.role].includes(search)
+  async function loadContacts() {
+    const { data } = await supabase
+      .from('users')
+      .select('id, full_name, role, avatar_url, is_active')
+      .eq('is_active', true)
+      .order('full_name')
+    setContacts((data ?? []) as DBUser[])
+    setLoading(false)
+  }
+
+  async function openDirectChat(contactId: string) {
+    if (!user) return
+    const myId = user.id
+
+    // Find existing direct group between the two users
+    const { data: myGroups } = await supabase
+      .from('group_members')
+      .select('group_id')
+      .eq('user_id', myId)
+      .is('left_at', null)
+
+    const myGroupIds = myGroups?.map(m => m.group_id) ?? []
+
+    if (myGroupIds.length > 0) {
+      const { data: shared } = await supabase
+        .from('group_members')
+        .select('group_id, groups:group_id(type)')
+        .eq('user_id', contactId)
+        .in('group_id', myGroupIds)
+        .is('left_at', null)
+
+      const directGroup = shared?.find((row: any) => row.groups?.type === 'direct')
+      if (directGroup) {
+        navigate(`/chat/${directGroup.group_id}`)
+        return
+      }
+    }
+
+    // Create new direct group
+    const contactData = contacts.find(c => c.id === contactId)
+    const { data: newGroup } = await supabase
+      .from('groups')
+      .insert({
+        name: contactData?.full_name ?? 'שיחה ישירה',
+        type: 'direct',
+        created_by: myId,
+      })
+      .select('id')
+      .single()
+
+    if (!newGroup) return
+
+    await supabase.from('group_members').insert([
+      { group_id: newGroup.id, user_id: myId },
+      { group_id: newGroup.id, user_id: contactId },
+    ])
+
+    navigate(`/chat/${newGroup.id}`)
+  }
+
+  const filtered = contacts.filter(c =>
+    c.id !== user?.id &&
+    (c.full_name.toLowerCase().includes(search.toLowerCase()) ||
+     roleLabel(c.role).includes(search))
   )
 
-  const grouped = ROLE_ORDER.reduce<Record<UserRole, Contact[]>>((acc, role) => {
-    acc[role] = filtered.filter(c => c.role === role)
+  // Group by role in order
+  const grouped = ROLE_ORDER.reduce<Record<string, DBUser[]>>((acc, role) => {
+    const group = filtered.filter(c => c.role === role)
+    if (group.length > 0) acc[role] = group
     return acc
-  }, { admin: [], office: [], field: [], external: [] })
+  }, {})
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#fff' }}>
@@ -87,46 +159,34 @@ export default function NewChat() {
           <span style={{ fontSize: 16, fontWeight: 500, color: '#111' }}>קבוצה חדשה</span>
         </div>
 
-        {/* Claude */}
-        <ContactRow contact={claude} onClick={() => navigate('/chat/claude')} />
+        {loading && (
+          <div style={{ padding: 24, textAlign: 'center', color: '#8696A0' }}>טוען...</div>
+        )}
 
         {/* Grouped contacts */}
-        {ROLE_ORDER.map(role => {
-          const group = grouped[role]
-          if (group.length === 0) return null
-          return (
-            <div key={role}>
-              <div style={{ padding: '8px 16px 4px', background: '#F0F2F5' }}>
-                <span style={{ fontSize: 13, color: '#CC0000', fontWeight: 600 }}>{ROLE_LABELS[role]}</span>
-              </div>
-              {group.map(contact => (
-                <ContactRow
-                  key={contact.id}
-                  contact={contact}
-                  onClick={() => navigate(`/chat/${contact.id}`)}
-                />
-              ))}
+        {Object.entries(grouped).map(([role, users]) => (
+          <div key={role}>
+            <div style={{ padding: '8px 16px 4px', background: '#F0F2F5' }}>
+              <span style={{ fontSize: 13, color: '#CC0000', fontWeight: 600 }}>{roleLabel(role)}</span>
             </div>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
-
-function ContactRow({ contact, onClick }: { contact: Contact; onClick: () => void }) {
-  return (
-    <div
-      onClick={onClick}
-      style={{
-        display: 'flex', alignItems: 'center', padding: '10px 16px', gap: 14,
-        cursor: 'pointer', borderBottom: '1px solid #F0F2F5',
-      }}
-    >
-      <Avatar contact={contact} size={48} />
-      <div>
-        <div style={{ fontSize: 16, fontWeight: 500, color: '#111' }}>{contact.name}</div>
-        <div style={{ fontSize: 13, color: '#8696A0' }}>{ROLE_LABELS[contact.role]}</div>
+            {users.map(contact => (
+              <div
+                key={contact.id}
+                onClick={() => openDirectChat(contact.id)}
+                style={{
+                  display: 'flex', alignItems: 'center', padding: '10px 16px', gap: 14,
+                  cursor: 'pointer', borderBottom: '1px solid #F0F2F5',
+                }}
+              >
+                <Avatar name={contact.full_name} size={48} />
+                <div>
+                  <div style={{ fontSize: 16, fontWeight: 500, color: '#111' }}>{contact.full_name}</div>
+                  <div style={{ fontSize: 13, color: '#8696A0' }}>{roleLabel(contact.role)}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ))}
       </div>
     </div>
   )

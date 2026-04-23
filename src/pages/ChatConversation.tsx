@@ -137,8 +137,17 @@ export default function ChatConversation() {
 
   if (!groupInfo) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
-        <span>שיחה לא נמצאה</span>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 16 }}>
+        <span style={{ color: '#54656F', fontSize: 16 }}>שיחה לא נמצאה</span>
+        <button
+          onClick={() => navigate('/chats')}
+          style={{
+            background: '#CC0000', color: '#fff', border: 'none', borderRadius: 8,
+            padding: '10px 24px', fontSize: 15, cursor: 'pointer', fontWeight: 500,
+          }}
+        >
+          חזרה לשיחות
+        </button>
       </div>
     )
   }
