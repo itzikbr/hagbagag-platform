@@ -21,6 +21,7 @@ export default function ChatList() {
   const [search, setSearch] = useState('')
   const navigate = useNavigate()
   const userId = useAuth(s => s.user?.id)
+  const profile = useAuth(s => s.profile)
 
   useEffect(() => {
     if (!userId) return
@@ -147,6 +148,17 @@ export default function ChatList() {
               <path d="M4 20C4 17 7.6 15 12 15C16.4 15 20 17 20 20" stroke="rgba(255,255,255,0.8)" strokeWidth="2" strokeLinecap="round"/>
             </svg>
           </button>
+          {profile?.role === 'manager' && (
+            <button
+              onClick={() => navigate('/admin')}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}
+            >
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                <circle cx="12" cy="12" r="3" stroke="rgba(255,255,255,0.8)" strokeWidth="2"/>
+                <path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" stroke="rgba(255,255,255,0.8)" strokeWidth="2" strokeLinecap="round"/>
+              </svg>
+            </button>
+          )}
         </div>
       </div>
 
