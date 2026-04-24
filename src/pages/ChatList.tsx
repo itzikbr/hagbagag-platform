@@ -22,13 +22,12 @@ export default function ChatList() {
   const navigate = useNavigate()
   const userId = useAuth(s => s.user?.id)
   const profile = useAuth(s => s.profile)
-  const logout = useAuth(s => s.logout)
 
   useEffect(() => {
     if (!userId) return
     loadGroups()
 
-    // Realtime â refresh when a new message arrives in any group
+    // Realtime — refresh when a new message arrives in any group
     const channel = supabase
       .channel('chatlist-messages')
       .on('postgres_changes', {
@@ -79,13 +78,13 @@ export default function ChatList() {
         .eq('is_deleted', false)
         .order('created_at', { ascending: false })
 
-      // Build a map: group_id â last message
+      // Build a map: group_id → last message
       const lastMsgMap: Record<string, { content: string; created_at: string }> = {}
       if (allMessages) {
         for (const msg of allMessages) {
           if (!lastMsgMap[msg.group_id]) {
             lastMsgMap[msg.group_id] = {
-              content: msg.content ?? (msg.message_type !== 'text' ? `ð ${msg.message_type}` : ''),
+              content: msg.content ?? (msg.message_type !== 'text' ? `📎 ${msg.message_type}` : ''),
               created_at: msg.created_at,
             }
           }
@@ -100,7 +99,7 @@ export default function ChatList() {
           type: g.type as 'direct' | 'group',
           avatar_url: g.avatar_url,
           updated_at: g.updated_at,
-          lastMessage: lm?.content ?? '×¢×××× ××× ××××¢××ª',
+          lastMessage: lm?.content ?? 'עדיין אין הודעות',
           lastMessageTime: lm ? formatTime(lm.created_at) : '',
           unreadCount: 0, // TODO: compute unread from message_reads
         }
@@ -128,7 +127,10 @@ export default function ChatList() {
         justifyContent: 'space-between',
         flexShrink: 0,
       }}>
-        <span style={{ color: '#fff', fontSize: 20, fontWeight: 700 }}>×× ×××</span>
+        <button onClick={async () => { await logout(); navigate('/login', { replace: true }) }} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" stroke="rgba(255,255,255,0.7)" strokeWidth="2" strokeLinecap="round"/><polyline points="16 17 21 12 16 7" stroke="rgba(255,255,255,0.7)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/><line x1="21" y1="12" x2="9" y2="12" stroke="rgba(255,255,255,0.7)" strokeWidth="2" strokeLinecap="round"/></svg>
+        </button>
+        <span style={{ color: '#fff', fontSize: 20, fontWeight: 700 }}>חג בגג</span>
         <div style={{ display: 'flex', gap: 8 }}>
           <button
             onClick={() => navigate('/new-chat')}
@@ -179,7 +181,7 @@ export default function ChatList() {
           </svg>
           <input
             type="text"
-            placeholder="×××¤××©"
+            placeholder="חיפוש"
             value={search}
             onChange={e => setSearch(e.target.value)}
             style={{
@@ -194,12 +196,12 @@ export default function ChatList() {
       <div style={{ flex: 1, overflowY: 'auto', background: '#fff' }} className="no-scrollbar">
         {loading && (
           <div style={{ padding: 24, textAlign: 'center', color: '#8696A0' }}>
-            ×××¢× ×©××××ª...
+            טוען שיחות...
           </div>
         )}
         {!loading && filtered.length === 0 && (
           <div style={{ padding: 24, textAlign: 'center', color: '#8696A0' }}>
-            ××× ×©××××ª ×¢××××. ×××¥ + ××× ×××¦××¨ ×§×××¦×.
+            אין שיחות עדיין. לחץ + כדי ליצור קבוצה.
           </div>
         )}
         {filtered.map(group => (
