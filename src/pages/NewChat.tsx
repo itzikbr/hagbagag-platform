@@ -5,13 +5,15 @@ import { useAuth } from '../hooks/useAuth'
 import { DBUser } from '../types'
 import Avatar from '../components/Avatar'
 
-const ROLE_ORDER = ['admin', 'office', 'field_worker', 'external']
+const ROLE_ORDER = ['manager', 'office', 'field_worker', 'field', 'external', 'admin']
 
 function roleLabel(role: string): string {
   switch (role) {
-    case 'admin':       return 'מנהל'
+    case 'manager':     return 'הנהלה'
+    case 'admin':       return 'הנהלה'
     case 'office':      return 'משרד'
     case 'field_worker': return 'שטח'
+    case 'field':       return 'שטח'
     case 'external':    return 'חיצוני'
     default:            return role
   }
