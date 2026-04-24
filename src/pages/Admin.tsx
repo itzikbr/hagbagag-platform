@@ -30,6 +30,8 @@ export default function Admin() {
   const [showAddForm, setShowAddForm] = useState(false)
   const [newUser, setNewUser] = useState({ full_name: '', role: 'field_worker', username: '', password: '' })
   const [addMsg, setAddMsg] = useState('')
+  const [editingName, setEditingName] = useState<{ id: string; value: string } | null>(null)
+  const [changingPassword, setChangingPassword] = useState<{ id: string; value: string } | null>(null)
 
   useEffect(() => {
     if (profile?.role === 'manager') loadUsers()
@@ -68,6 +70,40 @@ export default function Admin() {
       setUsers(prev => prev.map(u => u.id === userId ? { ...u, is_active: !current } : u))
     }
     setSaving(null)
+  }
+
+  async function updateName(userId: string, name: string) {
+    if (!name.trim()) return
+    setSaving(userId)
+    const { error } = await supabase
+      .from('users')
+      .update({ full_name: name.trim(), updated_at: new Date().toISOString() })
+      .eq('id', userId)
+    if (!error) {
+      setUsers(prev => prev.map(u => u.id === userId ? { ...u, full_name: name.trim() } : u))
+      setEditingName(null)
+    }
+    setSaving(null)
+  }
+
+  async function changePassword(userId: string, newPassword: string) {
+    if (!newPassword || newPassword.length < 4) return
+    setSaving(userId)
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const res = await fetch('https://edsivltyzrfjrjhwfbid.supabase.co/functions/v1/create-user', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session?.access_token}`,
+        },
+        body: JSON.stringify({ user_id: userId, password: newPassword })
+      })
+      const result = await res.json()
+      if (result.success) setChangingPassword(null)
+    } finally {
+      setSaving(null)
+    }
   }
 
   if (profile?.role !== 'manager') {
@@ -127,7 +163,7 @@ export default function Admin() {
             />
             <input
               type="password"
-              placeholder="סיסמה ראשונית *"
+              placeholder="סיסמא ראשונית *"
               value={newUser.password}
               onChange={e => setNewUser(p => ({ ...p, password: e.target.value }))}
               style={{ width: '100%', border: '1px solid #E0E0E0', borderRadius: 8, padding: '8px 12px', fontSize: 14, marginBottom: 8, boxSizing: 'border-box', direction: 'ltr' }}
@@ -149,7 +185,7 @@ export default function Admin() {
                   return
                 }
                 if (!newUser.password || newUser.password.length < 4) {
-                  setAddMsg('סיסמה חייבת להיות לפחות 4 תווים')
+                  setAddMsg('סיסמא חייבת להיות לפחות 4 תווים')
                   return
                 }
                 setAddMsg('יוצר משתמש...')
@@ -170,7 +206,7 @@ export default function Admin() {
                   })
                   const result = await res.json()
                   if (result.success) {
-                    setAddMsg('✅ ' + newUser.full_name + ' נוסף בהצלחה!')
+                    setAddMsg('✅ ' + newUser.full_name + ' נוסף בהצלחא!')
                     setNewUser({ full_name: '', role: 'field_worker', username: '', password: '' })
                     loadUsers()
                   } else {
@@ -203,9 +239,17 @@ export default function Admin() {
                 user={u}
                 editing={editingId === u.id}
                 saving={saving === u.id}
+                editingName={editingName?.id === u.id ? editingName.value : null}
+                changingPassword={changingPassword?.id === u.id ? changingPassword.value : null}
                 onEdit={() => setEditingId(editingId === u.id ? null : u.id)}
                 onRoleChange={(role) => updateRole(u.id, role)}
                 onToggleActive={() => toggleActive(u.id, u.is_active)}
+                onStartEditName={() => setEditingName({ id: u.id, value: u.full_name })}
+                onNameChange={(v) => setEditingName({ id: u.id, value: v })}
+                onSaveName={() => updateName(u.id, editingName?.value ?? '')}
+                onStartChangePassword={() => setChangingPassword({ id: u.id, value: '' })}
+                onPasswordChange={(v) => setChangingPassword({ id: u.id, value: v })}
+                onSavePassword={() => changePassword(u.id, changingPassword?.value ?? '')}
               />
             ))}
           </div>
@@ -223,9 +267,17 @@ export default function Admin() {
                 user={u}
                 editing={editingId === u.id}
                 saving={saving === u.id}
+                editingName={editingName?.id === u.id ? editingName.value : null}
+                changingPassword={changingPassword?.id === u.id ? changingPassword.value : null}
                 onEdit={() => setEditingId(editingId === u.id ? null : u.id)}
                 onRoleChange={(role) => updateRole(u.id, role)}
                 onToggleActive={() => toggleActive(u.id, u.is_active)}
+                onStartEditName={() => setEditingName({ id: u.id, value: u.full_name })}
+                onNameChange={(v) => setEditingName({ id: u.id, value: v })}
+                onSaveName={() => updateName(u.id, editingName?.value ?? '')}
+                onStartChangePassword={() => setChangingPassword({ id: u.id, value: '' })}
+                onPasswordChange={(v) => setChangingPassword({ id: u.id, value: v })}
+                onSavePassword={() => changePassword(u.id, changingPassword?.value ?? '')}
               />
             ))}
           </div>
@@ -237,13 +289,21 @@ export default function Admin() {
   )
 }
 
-function UserCard({ user, editing, saving, onEdit, onRoleChange, onToggleActive }: {
+function UserCard({ user, editing, saving, editingName, changingPassword, onEdit, onRoleChange, onToggleActive, onStartEditName, onNameChange, onSaveName, onStartChangePassword, onPasswordChange, onSavePassword }: {
   user: DBUser
   editing: boolean
   saving: boolean
+  editingName: string | null
+  changingPassword: string | null
   onEdit: () => void
   onRoleChange: (role: string) => void
   onToggleActive: () => void
+  onStartEditName: () => void
+  onNameChange: (v: string) => void
+  onSaveName: () => void
+  onStartChangePassword: () => void
+  onPasswordChange: (v: string) => void
+  onSavePassword: () => void
 }) {
   return (
     <div style={{ background: user.is_active ? '#fff' : '#F9F9F9', borderBottom: '1px solid #F0F2F5', padding: '12px 16px' }}>
@@ -252,31 +312,49 @@ function UserCard({ user, editing, saving, onEdit, onRoleChange, onToggleActive 
           <Avatar name={user.full_name} size={46} />
         </div>
         <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 15, fontWeight: 500, color: user.is_active ? '#111' : '#999' }}>
-            {user.full_name}
-            {!user.is_active && <span style={{ fontSize: 11, color: '#bbb', marginRight: 6 }}>מושהה</span>}
-          </div>
+          {editingName !== null ? (
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <input value={editingName} onChange={e => onNameChange(e.target.value)} autoFocus
+                style={{ border: '1px solid #CC0000', borderRadius: 6, padding: '4px 8px', fontSize: 14, flex: 1, direction: 'rtl' }} />
+              <button onClick={onSaveName} style={{ background: '#CC0000', color: '#fff', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 13 }}>שמור</button>
+            </div>
+          ) : (
+            <div style={{ fontSize: 15, fontWeight: 500, color: user.is_active ? '#111' : '#999', cursor: 'pointer' }} onClick={onStartEditName}>
+              {user.full_name} ✎
+              {!user.is_active && <span style={{ fontSize: 11, color: '#bbb', marginRight: 6 }}>מושהה</span>}
+            </div>
+          )}
           <div style={{ fontSize: 13, color: '#8696A0', marginTop: 2 }}>
             {ROLE_LABELS[user.role] || user.role}
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 6 }}>
-          <button
-            onClick={onEdit}
-            disabled={saving}
-            style={{ background: editing ? '#FFF0F0' : '#F0F2F5', border: 'none', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontSize: 13, color: editing ? '#CC0000' : '#555', fontWeight: editing ? 600 : 400 }}
-          >
-            תפקיד
-          </button>
-          <button
-            onClick={onToggleActive}
-            disabled={saving}
-            style={{ background: user.is_active ? '#FFF0F0' : '#F0FFF0', border: 'none', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontSize: 13, color: user.is_active ? '#CC0000' : '#16a34a', fontWeight: 600, minWidth: 52 }}
-          >
-            {saving ? '...' : user.is_active ? 'השהה' : 'הפעל'}
+        <div style={{ display: 'flex', gap: 6, flexDirection: 'column', alignItems: 'flex-end' }}>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button onClick={onEdit} disabled={saving}
+              style={{ background: editing ? '#FFF0F0' : '#F0F2F5', border: 'none', borderRadius: 8, padding: '5px 10px', cursor: 'pointer', fontSize: 12, color: editing ? '#CC0000' : '#555' }}>
+              תפקיד
+            </button>
+            <button onClick={onToggleActive} disabled={saving}
+              style={{ background: user.is_active ? '#FFF0F0' : '#F0FFF0', border: 'none', borderRadius: 8, padding: '5px 10px', cursor: 'pointer', fontSize: 12, color: user.is_active ? '#CC0000' : '#16a34a', fontWeight: 600 }}>
+              {saving ? '...' : user.is_active ? 'השהה' : 'הפעל'}
+            </button>
+          </div>
+          <button onClick={onStartChangePassword} disabled={saving}
+            style={{ background: '#F0F2F5', border: 'none', borderRadius: 8, padding: '5px 10px', cursor: 'pointer', fontSize: 12, color: '#555' }}>
+            סיסמא
           </button>
         </div>
       </div>
+
+      {/* Password change */}
+      {changingPassword !== null && (
+        <div style={{ marginTop: 8, display: 'flex', gap: 8, paddingRight: 58, alignItems: 'center' }}>
+          <input type="password" placeholder="סיסמא חדשה" value={changingPassword} onChange={e => onPasswordChange(e.target.value)} autoFocus
+            style={{ border: '1px solid #CC0000', borderRadius: 6, padding: '6px 10px', fontSize: 14, flex: 1, direction: 'ltr' }} />
+          <button onClick={onSavePassword}
+            style={{ background: '#CC0000', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontSize: 13 }}>עדכן</button>
+        </div>
+      )}
 
       {/* Role selector */}
       {editing && (
