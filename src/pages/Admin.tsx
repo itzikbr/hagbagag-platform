@@ -100,7 +100,14 @@ export default function Admin() {
         body: JSON.stringify({ user_id: userId, password: newPassword })
       })
       const result = await res.json()
-      if (result.success) setChangingPassword(null)
+      if (result.success) {
+        setChangingPassword(null)
+      } else {
+        alert('שגיאה: ' + (result.error || 'לא ידוע'))
+        setChangingPassword(null)
+      }
+    } catch {
+      setChangingPassword(null)
     } finally {
       setSaving(null)
     }
@@ -163,7 +170,7 @@ export default function Admin() {
             />
             <input
               type="password"
-              placeholder="סיסמא ראשונית *"
+              placeholder="סיסמה ראשונית *"
               value={newUser.password}
               onChange={e => setNewUser(p => ({ ...p, password: e.target.value }))}
               style={{ width: '100%', border: '1px solid #E0E0E0', borderRadius: 8, padding: '8px 12px', fontSize: 14, marginBottom: 8, boxSizing: 'border-box', direction: 'ltr' }}
@@ -185,7 +192,7 @@ export default function Admin() {
                   return
                 }
                 if (!newUser.password || newUser.password.length < 4) {
-                  setAddMsg('סיסמא חייבת להיות לפחות 4 תווים')
+                  setAddMsg('סיסמה חייבת להיות לפחות 4 תווים')
                   return
                 }
                 setAddMsg('יוצר משתמש...')
@@ -206,7 +213,7 @@ export default function Admin() {
                   })
                   const result = await res.json()
                   if (result.success) {
-                    setAddMsg('✅ ' + newUser.full_name + ' נוסף בהצלחא!')
+                    setAddMsg('✅ ' + newUser.full_name + ' נוסף בהצלחה!')
                     setNewUser({ full_name: '', role: 'field_worker', username: '', password: '' })
                     loadUsers()
                   } else {
@@ -341,7 +348,7 @@ function UserCard({ user, editing, saving, editingName, changingPassword, onEdit
           </div>
           <button onClick={onStartChangePassword} disabled={saving}
             style={{ background: '#F0F2F5', border: 'none', borderRadius: 8, padding: '5px 10px', cursor: 'pointer', fontSize: 12, color: '#555' }}>
-            סיסמא
+            סיסמה
           </button>
         </div>
       </div>
@@ -349,7 +356,7 @@ function UserCard({ user, editing, saving, editingName, changingPassword, onEdit
       {/* Password change */}
       {changingPassword !== null && (
         <div style={{ marginTop: 8, display: 'flex', gap: 8, paddingRight: 58, alignItems: 'center' }}>
-          <input type="password" placeholder="סיסמא חדשה" value={changingPassword} onChange={e => onPasswordChange(e.target.value)} autoFocus
+          <input type="password" placeholder="סיסמה חדשה" value={changingPassword} onChange={e => onPasswordChange(e.target.value)} autoFocus
             style={{ border: '1px solid #CC0000', borderRadius: 6, padding: '6px 10px', fontSize: 14, flex: 1, direction: 'ltr' }} />
           <button onClick={onSavePassword}
             style={{ background: '#CC0000', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontSize: 13 }}>עדכן</button>
