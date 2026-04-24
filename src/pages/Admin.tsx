@@ -28,7 +28,7 @@ export default function Admin() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [saving, setSaving] = useState<string | null>(null)
   const [showAddForm, setShowAddForm] = useState(false)
-  const [newUser, setNewUser] = useState({ full_name: '', role: 'field_worker', email: '' })
+  const [newUser, setNewUser] = useState({ full_name: '', role: 'field_worker', email: '', password: '' })
   const [addMsg, setAddMsg] = useState('')
 
   useEffect(() => {
@@ -125,6 +125,13 @@ export default function Admin() {
               onChange={e => setNewUser(p => ({ ...p, email: e.target.value }))}
               style={{ width: '100%', border: '1px solid #E0E0E0', borderRadius: 8, padding: '8px 12px', fontSize: 14, marginBottom: 8, boxSizing: 'border-box', direction: 'ltr' }}
             />
+            <input
+              type="password"
+              placeholder="סיסמה ראשונית *"
+              value={newUser.password}
+              onChange={e => setNewUser(p => ({ ...p, password: e.target.value }))}
+              style={{ width: '100%', border: '1px solid #E0E0E0', borderRadius: 8, padding: '8px 12px', fontSize: 14, marginBottom: 8, boxSizing: 'border-box', direction: 'ltr' }}
+            />
             <select
               value={newUser.role}
               onChange={e => setNewUser(p => ({ ...p, role: e.target.value }))}
@@ -135,21 +142,47 @@ export default function Admin() {
             {addMsg && (
               <div style={{ fontSize: 13, color: addMsg.includes('✅') ? '#22c55e' : '#CC0000', marginBottom: 8, lineHeight: 1.6 }}>{addMsg}</div>
             )}
-            <div style={{ fontSize: 12, color: '#8696A0', marginBottom: 12, lineHeight: 1.6, background: '#FFFBEA', padding: '8px 10px', borderRadius: 8 }}>
-              ⚠️ שלב 1 מתוך 2: שמור כאן את הפרטים.<br/>
-              שלב 2: ב-Supabase Dashboard ← Authentication ← Add User ← הכנס את האימייל וסיסמה ראשונית.
-            </div>
             <button
-              onClick={() => {
+              onClick={async () => {
                 if (!newUser.full_name.trim() || !newUser.email.trim()) {
                   setAddMsg('שם ואימייל חובה')
                   return
                 }
-                setAddMsg(`✅ הפרטים נשמרו.\nכעת לך ל-Supabase Dashboard → Authentication → Users → Add User\nאימייל: ${newUser.email}`)
+                if (!newUser.password || newUser.password.length < 4) {
+                  setAddMsg('סיסמה חייבת להיות לפחות 4 תווים')
+                  return
+                }
+                setAddMsg('יוצר משתמש...')
+                try {
+                  const { data: { session } } = await supabase.auth.getSession()
+                  const res = await fetch('https://edsivltyzrfjrjhwfbid.supabase.co/functions/v1/create-user', {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      'Authorization': `Bearer ${session?.access_token}`,
+                    },
+                    body: JSON.stringify({
+                      email: newUser.email,
+                      password: newUser.password,
+                      full_name: newUser.full_name,
+                      role: newUser.role,
+                    })
+                  })
+                  const result = await res.json()
+                  if (result.success) {
+                    setAddMsg('✅ ' + newUser.full_name + ' נוסף בהצלחה!')
+                    setNewUser({ full_name: '', role: 'field_worker', email: '', password: '' })
+                    loadUsers()
+                  } else {
+                    setAddMsg('שגיאה: ' + (result.error || 'לא ידוע'))
+                  }
+                } catch {
+                  setAddMsg('שגיאת תקשורת')
+                }
               }}
               style={{ background: '#CC0000', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 20px', fontSize: 14, cursor: 'pointer', fontWeight: 600 }}
             >
-              שמור
+              צור משתמש
             </button>
           </div>
         )}
