@@ -28,7 +28,7 @@ export default function Admin() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [saving, setSaving] = useState<string | null>(null)
   const [showAddForm, setShowAddForm] = useState(false)
-  const [newUser, setNewUser] = useState({ full_name: '', role: 'field_worker', email: '', password: '' })
+  const [newUser, setNewUser] = useState({ full_name: '', role: 'field_worker', username: '', password: '' })
   const [addMsg, setAddMsg] = useState('')
 
   useEffect(() => {
@@ -119,10 +119,10 @@ export default function Admin() {
               style={{ width: '100%', border: '1px solid #E0E0E0', borderRadius: 8, padding: '8px 12px', fontSize: 14, marginBottom: 8, boxSizing: 'border-box', direction: 'rtl' }}
             />
             <input
-              type="email"
-              placeholder="אימייל * (לכניסה למערכת)"
-              value={newUser.email}
-              onChange={e => setNewUser(p => ({ ...p, email: e.target.value }))}
+              type="text"
+              placeholder="שם משתמש לכניסה * (למשל: amad)"
+              value={newUser.username}
+              onChange={e => setNewUser(p => ({ ...p, username: e.target.value.toLowerCase().replace(/\s/g, '') }))}
               style={{ width: '100%', border: '1px solid #E0E0E0', borderRadius: 8, padding: '8px 12px', fontSize: 14, marginBottom: 8, boxSizing: 'border-box', direction: 'ltr' }}
             />
             <input
@@ -144,8 +144,8 @@ export default function Admin() {
             )}
             <button
               onClick={async () => {
-                if (!newUser.full_name.trim() || !newUser.email.trim()) {
-                  setAddMsg('שם ואימייל חובה')
+                if (!newUser.full_name.trim() || !newUser.username.trim()) {
+                  setAddMsg('שם מלא ושם משתמש חובה')
                   return
                 }
                 if (!newUser.password || newUser.password.length < 4) {
@@ -162,7 +162,7 @@ export default function Admin() {
                       'Authorization': `Bearer ${session?.access_token}`,
                     },
                     body: JSON.stringify({
-                      email: newUser.email,
+                      email: `${newUser.username}@hagbagag.local`,
                       password: newUser.password,
                       full_name: newUser.full_name,
                       role: newUser.role,
@@ -171,7 +171,7 @@ export default function Admin() {
                   const result = await res.json()
                   if (result.success) {
                     setAddMsg('✅ ' + newUser.full_name + ' נוסף בהצלחה!')
-                    setNewUser({ full_name: '', role: 'field_worker', email: '', password: '' })
+                    setNewUser({ full_name: '', role: 'field_worker', username: '', password: '' })
                     loadUsers()
                   } else {
                     setAddMsg('שגיאה: ' + (result.error || 'לא ידוע'))
