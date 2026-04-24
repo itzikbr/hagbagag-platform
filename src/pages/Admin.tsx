@@ -161,13 +161,16 @@ export default function Admin() {
               onChange={e => setNewUser(p => ({ ...p, full_name: e.target.value }))}
               style={{ width: '100%', border: '1px solid #E0E0E0', borderRadius: 8, padding: '8px 12px', fontSize: 14, marginBottom: 8, boxSizing: 'border-box', direction: 'rtl' }}
             />
-            <input
-              type="text"
-              placeholder="שם משתמש לכניסה * (למשל: amad)"
-              value={newUser.username}
-              onChange={e => setNewUser(p => ({ ...p, username: e.target.value.toLowerCase().replace(/\s/g, '') }))}
-              style={{ width: '100%', border: '1px solid #E0E0E0', borderRadius: 8, padding: '8px 12px', fontSize: 14, marginBottom: 8, boxSizing: 'border-box', direction: 'ltr' }}
-            />
+            <div style={{ position: 'relative', marginBottom: 8 }}>
+              <input
+                type="text"
+                placeholder="שם כניסה * — באנגלית בלבד (samir, asaf...)"
+                value={newUser.username}
+                onChange={e => setNewUser(p => ({ ...p, username: e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '') }))}
+                style={{ width: '100%', border: '1px solid #E0E0E0', borderRadius: 8, padding: '8px 12px', fontSize: 14, boxSizing: 'border-box', direction: 'ltr' }}
+              />
+              <div style={{ fontSize: 11, color: '#8696A0', marginTop: 3, paddingRight: 4 }}>זה מה שהמשתמש יקליד בכניסה — אנגלית בלבד</div>
+            </div>
             <input
               type="password"
               placeholder="סיסמה ראשונית *"
