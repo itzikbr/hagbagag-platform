@@ -1,581 +1,606 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 
-// ──────────────────────────────────────────────────────────────
-// צבעים / קבועים
-// ──────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════
+// חג בגג — דף ביצוע v3 · טופס 3 לשוניות
+// ══════════════════════════════════════════════════════════════
 const RED = '#CC0000'
 const GREY = '#8696A0'
-const BG = '#F5F5F5'
-const BORDER = '#E0E0E0'
+const BG = '#F2EDE9'
+const BORDER = '#E5E0DB'
+const AUTOSAVE_MS = 2000
 
-// סוג העבודה היחיד בגרסה זו — התבנית תשוכפל לשאר הסוגים
-const WORK_TYPE = 'בניית גג (עץ ומתכת)'
+// ── רשימות בחירה ───────────────────────────────────────────────
+const FILLERS = ['עמאד', 'סמיר', 'עלי', 'אסף', 'דליה', 'מוטי', 'איציק']
+const ROOF_TYPES = ['חד שיפועי', 'דו שיפועי', 'רב שיפועי', 'אחר']
+const CONSTRUCTIONS = ['עץ', 'מתכת', 'אחר']
+const GENERAL_CHIPS = ['דוד שמש', 'קולטים', 'פאנלים סולריים', 'מזגנים', 'ארובה', 'פטרית איזור', 'חלון תאורה', 'אנטנות', 'אחר']
+const CRANE_OPTS = ['לא נדרש', 'קצר', 'ארוך', 'אחר']
+const CONTAINER_OPTS = ['לא נדרש', '10m³', '20m³', '30m³']
+const LIFT_OPTS = ['לא נדרש', 'דיזל', 'חשמלית']
+const ARM_OPTS = ['לא נדרש', 'מספריים', 'זרוע']
+const ACCESS_OPTS = ['קלה', 'מוגבלת', 'קשה', 'ללא גישה']
+const LOGISTICS_CHIPS = ['פנויה', 'עצים', 'חשמל', 'דרך צרה', 'אחר']
+const CEILING_OPTS = ['יש', 'בטון', 'רביץ', 'צפה', 'אחר', 'אין']
+const PANEL_OPTS = ['איסכורית', 'פנל מבודד', 'אחר']
+const ALUM_SHADES = ['חום', 'פולי סנדר', 'מהגוני', 'לבן', 'קרם', 'אפור', 'ירוק', 'אחר']
+const GUTTER_TYPES = ['חיצוני', 'פנימי', 'חיצוני ופנימי', 'אחר']
 
-// ── רשימות בחירה (ניתנות לעריכה בהמשך) ──
-const ROOFING_TYPES     = ['איסכורית', 'פנל מבודד', 'רעפים', 'אחר']
-const ROOFING_THICKNESS = ['0.4', '0.5', 'קלקר', 'אחר']
-const ROOFING_COLORS    = ['לבן', 'קרם', 'טרה קוטה', 'כסוף', 'אחר']
-const WOOD_TYPES        = ['קורה 4×2', 'קורה 3×2', 'לתה', 'אחר']
-const FLASHING_TYPES    = ['סוגר חזית', 'סוגר צד', 'פלשונג עליון', 'כובע לפלשונג', 'רוכב פח']
-const ALUM_TYPES        = ['חיפוי', 'סוגר', 'זווית', 'אחר']
-const ALUM_SHADES       = ['טבעי', 'לבן', 'שחור', 'ברונזה', 'אחר']
-const IRON_PROFILES     = ['UNP 80', 'UNP 100', 'IPE 100', 'זווית', 'אחר']
-const INSULATION_TYPES  = ['צמר סלעים', 'קלקר', 'יריעת בידוד', 'אחר']
-const MISC_ITEMS        = ['ברגים', 'סיליקון', 'אטם', 'צבע', 'אחר']
+interface WorkTypeMeta { key: string; label: string }
+const WORK_TYPES: WorkTypeMeta[] = [
+  { key: 'asbestos',    label: '🟠 הסרת אסבסט' },
+  { key: 'roofReplace', label: '🏠 החלפת גג' },
+  { key: 'aluminum',    label: '🔩 ציפוי אלומיניום' },
+  { key: 'gutters',     label: '🌧️ מרזבים' },
+  { key: 'insulation',  label: '🧊 בידוד' },
+  { key: 'other',       label: '📝 אחר' },
+]
+const WORK_TYPE_LABEL: Record<string, string> = Object.fromEntries(WORK_TYPES.map(w => [w.key, w.label]))
 
-// ──────────────────────────────────────────────────────────────
-// טיפוסים
-// ──────────────────────────────────────────────────────────────
-interface QLRow { qty: string; length: string }               // כמות × אורך
-interface RoofingBlock { type: string; thickness: string; color: string; rows: QLRow[] }
-interface TypedRow { type: string; qty: string; measure: string }   // סוג + כמות × מידה
-interface AlumRow { type: string; shade: string; qty: string; measure: string }
-interface WoodRow { type: string; qty: string; length: string }
-interface MiscRow { item: string; note: string }
+// ── מטא־דאטה קטגוריות חומרים ───────────────────────────────────
+interface CatMeta { label: string; color: string; head: string; hasShade: boolean; roofSub: boolean; unit: string }
+const CATEGORY_META: Record<string, CatMeta> = {
+  aluminum:   { label: 'חיפוי אלומיניום', color: '#1A5FAD', head: '#EBF2FC', hasShade: true,  roofSub: false, unit: 'מ׳' },
+  flashing:   { label: 'פחחות',           color: '#B8540A', head: '#FDF0E8', hasShade: false, roofSub: false, unit: 'מ"א' },
+  roofing:    { label: 'קירוי',           color: '#1A7A3A', head: '#E8F5EC', hasShade: false, roofSub: true,  unit: 'מ"א' },
+  wood:       { label: 'עץ',              color: '#7A4F1A', head: '#F5EFE6', hasShade: false, roofSub: false, unit: 'מ"א' },
+  gutters:    { label: 'מרזבים',          color: '#2C6B8A', head: '#E8F2F5', hasShade: false, roofSub: false, unit: 'מ׳' },
+  insulation: { label: 'בידוד',           color: '#7A4CA0', head: '#F0EBF5', hasShade: false, roofSub: false, unit: 'מ"ר' },
+}
+const CATEGORY_ORDER = ['aluminum', 'roofing', 'flashing', 'wood', 'gutters', 'insulation']
 
-interface Materials {
-  roofing: RoofingBlock[]
-  wood: WoodRow[]
-  woodDisinfected: boolean
-  woodPlaned: boolean
-  flashing: TypedRow[]
-  aluminum: AlumRow[]
-  iron: TypedRow[]
-  insulation: TypedRow[]
-  misc: MiscRow[]
-  hidden: string[]        // מפתחות קטגוריות שנמחקו מהתצוגה
+// ══════════════════════════════════════════════════════════════
+// טיפוסים (TypeScript interfaces לכל ה-state)
+// ══════════════════════════════════════════════════════════════
+interface DetailsTab {
+  date: string
+  fillerName: string
+  customerName: string
+  address: string
+  phones: string[]
+  solarPrep: boolean
+}
+interface GeneralProps {
+  roofHeight: string
+  area: string
+  roofType: string
+  construction: string
+  chips: string[]
+}
+interface Logistics {
+  crane: string
+  container: string
+  lift: string
+  arm: string
+  access: string
+  workHeight: string
+  chips: string[]
+}
+interface AsbestosBlock {
+  coordX: string; coordY: string; usedFor: string
+  ceiling: string; ceilingConstruction: string
+  grandpaStick: string; empty: string; sensitive: string
+}
+interface RoofReplaceBlock {
+  existingRoof: string; newRoof: string
+  construction: string; slope: string; overhang: string
+  panelType: string; thickness1: string; thickness2: string
+}
+interface AluminumBlock { shade: string; meters: string; coating: string[] }
+interface GuttersBlock {
+  type: string; guttersM: string; guttersSegments: string
+  downUnits: string; downSegments: string
+}
+interface InsulationBlock { type: string; area: string; thickness: string }
+interface OtherBlock { note: string }
+interface WorkBlocks {
+  asbestos: AsbestosBlock
+  roofReplace: RoofReplaceBlock
+  aluminum: AluminumBlock
+  gutters: GuttersBlock
+  insulation: InsulationBlock
+  other: OtherBlock
+}
+interface MaterialRow { type: string; shade: string; qty: string; measure: string }
+interface MaterialCategory { rows: MaterialRow[]; thickness: string; color: string }
+interface MaterialsState { active: string[]; data: Record<string, MaterialCategory> }
+interface DocItem { path: string; url: string; name: string; note: string; noteOpen: boolean }
+interface Documentation { photos: DocItem[]; sketch: DocItem[]; documents: DocItem[] }
+
+interface SheetForm {
+  details: DetailsTab
+  general: GeneralProps
+  logistics: Logistics
+  workTypes: string[]
+  blocks: WorkBlocks
+  materials: MaterialsState
+  documentation: Documentation
+  notes: Record<string, string>
 }
 
-function emptyMaterials(): Materials {
+// ── ברירות מחדל ────────────────────────────────────────────────
+function todayISO(): string { return new Date().toISOString().slice(0, 10) }
+function emptyBlocks(): WorkBlocks {
   return {
-    roofing: [], wood: [], woodDisinfected: false, woodPlaned: false,
-    flashing: [], aluminum: [], iron: [], insulation: [], misc: [], hidden: [],
+    asbestos:    { coordX: '', coordY: '', usedFor: '', ceiling: '', ceilingConstruction: '', grandpaStick: '', empty: '', sensitive: '' },
+    roofReplace: { existingRoof: '', newRoof: '', construction: '', slope: '', overhang: '', panelType: '', thickness1: '', thickness2: '' },
+    aluminum:    { shade: '', meters: '', coating: [] },
+    gutters:     { type: '', guttersM: '', guttersSegments: '', downUnits: '', downSegments: '' },
+    insulation:  { type: '', area: '', thickness: '' },
+    other:       { note: '' },
+  }
+}
+function emptyCategory(): MaterialCategory { return { rows: [{ type: '', shade: '', qty: '', measure: '' }], thickness: '', color: '' } }
+function emptyForm(): SheetForm {
+  return {
+    details: { date: todayISO(), fillerName: '', customerName: '', address: '', phones: [''], solarPrep: false },
+    general: { roofHeight: '', area: '', roofType: '', construction: '', chips: [] },
+    logistics: { crane: '', container: '', lift: '', arm: '', access: '', workHeight: '', chips: [] },
+    workTypes: [],
+    blocks: emptyBlocks(),
+    materials: { active: ['flashing'], data: { flashing: emptyCategory() } },
+    documentation: { photos: [], sketch: [], documents: [] },
+    notes: {},
   }
 }
 
-interface CatMeta { key: string; label: string }
-const CATEGORIES: CatMeta[] = [
-  { key: 'roofing',    label: 'חומרי קירוי' },
-  { key: 'wood',       label: 'עץ' },
-  { key: 'flashing',   label: 'פחחות' },
-  { key: 'aluminum',   label: 'חיפוי אלומיניום' },
-  { key: 'iron',       label: 'ברזל · קונסטרוקציית מתכת' },
-  { key: 'insulation', label: 'בידוד' },
-  { key: 'misc',       label: 'שונות' },
-]
-
-function todayISO(): string {
-  return new Date().toISOString().slice(0, 10)
-}
-function num(s: string): number {
-  const n = parseFloat(s)
-  return isNaN(n) ? 0 : n
-}
+function num(s: string): number { const n = parseFloat(s); return isNaN(n) ? 0 : n }
 function fmt(n: number): string {
   if (!n) return '0'
   return Number.isInteger(n) ? String(n) : n.toFixed(2).replace(/\.?0+$/, '')
 }
+function derivedCategories(workTypes: string[]): string[] {
+  const s = new Set<string>(['flashing'])
+  if (workTypes.includes('roofReplace')) { s.add('roofing'); s.add('flashing') }
+  if (workTypes.includes('aluminum'))    { s.add('aluminum'); s.add('flashing') }
+  if (workTypes.includes('gutters'))      s.add('gutters')
+  if (workTypes.includes('insulation'))   s.add('insulation')
+  return CATEGORY_ORDER.filter(k => s.has(k))
+}
 
-// ──────────────────────────────────────────────────────────────
-// סגנונות משותפים
-// ──────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════
+// סגנונות
+// ══════════════════════════════════════════════════════════════
 const inputStyle: React.CSSProperties = {
-  width: '100%', height: 38, boxSizing: 'border-box', border: `1px solid ${BORDER}`,
+  width: '100%', height: 36, boxSizing: 'border-box', border: `1px solid ${BORDER}`,
   borderRadius: 8, padding: '0 10px', fontSize: 13, fontWeight: 600, color: '#111',
   direction: 'rtl', outline: 'none', background: '#fff', fontFamily: 'inherit',
 }
-const addRowBtn: React.CSSProperties = {
-  background: 'none', border: 'none', color: RED, fontSize: 14, fontWeight: 700,
-  cursor: 'pointer', padding: '6px 0', fontFamily: 'inherit',
-}
+const labelStyle: React.CSSProperties = { fontSize: 11, fontWeight: 700, color: '#555', marginBottom: 3, direction: 'rtl' }
+const grid2: React.CSSProperties = { display: 'grid', gridTemplateColumns: '48% 52%', gap: 8, marginBottom: 8 }
 
-// ── דרופדאון עם position:fixed — לא נחסם ע"י overflow ──────────
-function Dropdown({ value, options, onChange, placeholder = 'בחר', flex = 1 }: {
-  value: string; options: string[]; onChange: (v: string) => void; placeholder?: string; flex?: number
+// ── פקדים בסיסיים ──────────────────────────────────────────────
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return <div style={{ minWidth: 0 }}><div style={labelStyle}>{label}</div>{children}</div>
+}
+function TextInput({ value, onChange, placeholder, type = 'text' }: {
+  value: string; onChange: (v: string) => void; placeholder?: string; type?: string
 }) {
-  const [open, setOpen] = useState(false)
-  const [rect, setRect] = useState<DOMRect | null>(null)
-  const btnRef = useRef<HTMLButtonElement>(null)
-
-  function toggle() {
-    if (!open && btnRef.current) setRect(btnRef.current.getBoundingClientRect())
-    setOpen(o => !o)
-  }
-
+  return <input dir="rtl" type={type} style={inputStyle} value={value} placeholder={placeholder}
+    inputMode={type === 'number' ? 'decimal' : undefined}
+    onChange={e => onChange(e.target.value)} />
+}
+function SelectBox({ value, onChange, options, placeholder = 'בחר' }: {
+  value: string; onChange: (v: string) => void; options: string[]; placeholder?: string
+}) {
   return (
-    <>
-      <button ref={btnRef} type="button" onClick={toggle} style={{
-        ...inputStyle, flex, width: 'auto', display: 'flex', alignItems: 'center',
-        justifyContent: 'space-between', gap: 6, cursor: 'pointer',
-      }}>
-        <span style={{
-          color: value ? '#111' : '#BBB', overflow: 'hidden',
-          textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }}>{value || placeholder}</span>
-        <span style={{ color: GREY, fontSize: 9, flexShrink: 0 }}>▼</span>
-      </button>
-      {open && rect && (
-        <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 200 }}>
-          <div onClick={e => e.stopPropagation()} className="no-scrollbar" style={{
-            position: 'fixed', top: rect.bottom + 4, right: window.innerWidth - rect.right,
-            width: Math.max(rect.width, 150), maxHeight: 260, overflowY: 'auto',
-            background: '#fff', border: `1px solid ${BORDER}`, borderRadius: 10,
-            boxShadow: '0 6px 24px rgba(0,0,0,0.18)', direction: 'rtl', fontFamily: 'inherit',
-          }}>
-            {options.map(o => (
-              <button key={o} type="button" onClick={() => { onChange(o); setOpen(false) }} style={{
-                width: '100%', textAlign: 'right', padding: '11px 14px',
-                background: o === value ? '#FDECEC' : '#fff', border: 'none',
-                borderBottom: `1px solid ${BORDER}`, cursor: 'pointer', fontFamily: 'inherit',
-                fontSize: 14, color: '#111', fontWeight: o === value ? 700 : 500,
-              }}>{o}</button>
-            ))}
-          </div>
-        </div>
-      )}
-    </>
+    <select dir="rtl" value={value} onChange={e => onChange(e.target.value)}
+      style={{ ...inputStyle, color: value ? '#111' : '#555', appearance: 'none', cursor: 'pointer' }}>
+      <option value="" disabled hidden>{placeholder}</option>
+      {options.map(o => <option key={o} value={o}>{o}</option>)}
+    </select>
   )
 }
-
-function DeleteX({ onClick }: { onClick: () => void }) {
-  return (
-    <button type="button" onClick={onClick} style={{
-      background: 'none', border: 'none', color: GREY, cursor: 'pointer',
-      fontSize: 20, lineHeight: 1, padding: '0 4px', fontFamily: 'inherit',
-    }}>×</button>
-  )
+function TextArea({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
+  return <textarea dir="rtl" value={value} placeholder={placeholder} onChange={e => onChange(e.target.value)}
+    style={{ ...inputStyle, height: 'auto', minHeight: 60, padding: 10, resize: 'vertical', lineHeight: 1.4 }} />
 }
-
-function Chip({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+function Chip({ label, active, onClick, tone = 'red' }: { label: string; active: boolean; onClick: () => void; tone?: 'red' | 'orange' }) {
+  const on = tone === 'orange' ? { bg: '#FFF0F0', color: '#CC0000', border: '#FFBBBB' } : { bg: '#FFF0F0', color: '#CC0000', border: '#FFBBBB' }
   return (
     <button type="button" onClick={onClick} style={{
-      border: active ? `1px solid ${RED}` : `1px solid ${BORDER}`,
-      background: active ? RED : '#fff', color: active ? '#fff' : '#333',
-      borderRadius: 18, padding: '6px 14px', fontSize: 13, fontWeight: 600,
+      border: active ? `1px solid ${on.border}` : `1px solid ${BORDER}`,
+      background: active ? on.bg : '#fff', color: active ? on.color : '#444',
+      borderRadius: 16, padding: '6px 12px', fontSize: 12, fontWeight: 700,
       cursor: 'pointer', direction: 'rtl', fontFamily: 'inherit',
     }}>{label}</button>
   )
 }
-
-// ── כרטיס קטגוריה מתקפל ────────────────────────────────────────
-function CategoryCard({ title, summary, open, onToggle, onDelete, children }: {
-  title: string; summary: string; open: boolean
-  onToggle: () => void; onDelete: () => void; children: React.ReactNode
-}) {
+function ChipGroup({ options, value, onChange }: { options: string[]; value: string[]; onChange: (v: string[]) => void }) {
   return (
-    <div style={{ background: '#fff', border: `1px solid ${BORDER}`, borderRadius: 12, marginBottom: 12, overflow: 'hidden' }}>
-      <div onClick={onToggle} style={{
-        display: 'flex', alignItems: 'center', gap: 8, padding: '12px 12px',
-        cursor: 'pointer', direction: 'rtl',
-      }}>
-        <button type="button" onClick={e => { e.stopPropagation(); onDelete() }} title="הסר קטגוריה" style={{
-          width: 26, height: 26, borderRadius: '50%', border: `1px solid ${BORDER}`,
-          background: '#fff', color: GREY, cursor: 'pointer', fontSize: 18, lineHeight: 1,
-          flexShrink: 0, fontFamily: 'inherit',
-        }}>−</button>
-
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-          <span style={{ fontSize: 15, fontWeight: 800, color: RED }}>{title}</span>
-          {summary && <span style={{ fontSize: 10, color: GREY, fontWeight: 500 }}>{summary}</span>}
-        </div>
-
-        <span style={{
-          flexShrink: 0, transition: 'transform 0.2s', transform: open ? 'rotate(90deg)' : 'rotate(0deg)',
-        }}>
-          <svg width="9" height="15" viewBox="0 0 8 14" fill="none">
-            <path d="M6.5 1 1.5 7l5 6" stroke="#C4C4C4" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </span>
-      </div>
-      {open && <div style={{ padding: '2px 12px 14px' }}>{children}</div>}
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, direction: 'rtl' }}>
+      {options.map(o => (
+        <Chip key={o} label={o} active={value.includes(o)}
+          onClick={() => onChange(value.includes(o) ? value.filter(x => x !== o) : [...value, o])} />
+      ))}
+    </div>
+  )
+}
+function YesNoChip({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <div style={{ display: 'flex', gap: 6, direction: 'rtl' }}>
+      <Chip label="לא" active={!value} onClick={() => onChange(false)} />
+      <Chip label="✓ כן" active={value} onClick={() => onChange(true)} />
     </div>
   )
 }
 
-// ── סרגל סה"כ ──────────────────────────────────────────────────
-function TotalBar({ label, value }: { label: string; value: string }) {
+// ── כרטיסייה עם כותרת + כפתור הערה ─────────────────────────────
+function Card({ id, title, tone = 'default', notes, setNotes, notesOpen, toggleNote, children }: {
+  id?: string; title: string; tone?: 'default' | 'orange' | 'red'
+  notes?: Record<string, string>; setNotes?: (k: string, v: string) => void
+  notesOpen?: Set<string>; toggleNote?: (k: string) => void
+  children: React.ReactNode
+}) {
+  const head = tone === 'orange' ? { bg: '#FFF5E6', color: '#D14900' }
+    : tone === 'red' ? { bg: '#FFF0F0', color: '#CC0000' }
+    : { bg: '#F8F8F8', color: '#666' }
+  const noteEnabled = !!(id && notes && setNotes && notesOpen && toggleNote)
+  const open = noteEnabled && notesOpen!.has(id!)
   return (
     <div style={{
-      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-      marginTop: 10, padding: '8px 12px', border: `1.5px solid ${RED}`,
-      borderRadius: 8, direction: 'rtl',
+      background: '#fff', margin: '6px 8px', borderRadius: 10,
+      boxShadow: '0 1px 3px rgba(0,0,0,0.07)', overflow: 'hidden',
+      ...(tone === 'orange' ? { borderRight: '3px solid #FFB300' } : {}),
     }}>
-      <span style={{ fontSize: 13, fontWeight: 700, color: '#111' }}>{label}</span>
-      <span style={{ fontSize: 15, fontWeight: 800, color: RED }}>{value}</span>
-    </div>
-  )
-}
-
-// ── שורת כמות × מידה עם תוצאה אדומה ────────────────────────────
-function QtyMeasureRow({ qty, measure, measurePlaceholder, onQty, onMeasure }: {
-  qty: string; measure: string; measurePlaceholder: string
-  onQty: (v: string) => void; onMeasure: (v: string) => void
-}) {
-  const result = num(qty) * num(measure)
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 6, direction: 'rtl' }}>
-      <input style={{ ...inputStyle, flex: 1 }} type="number" inputMode="numeric" placeholder="כמות"
-        value={qty} onChange={e => onQty(e.target.value)} />
-      <span style={{ color: GREY, fontSize: 13, fontWeight: 700 }}>×</span>
-      <input style={{ ...inputStyle, flex: 1 }} type="number" inputMode="decimal" placeholder={measurePlaceholder}
-        value={measure} onChange={e => onMeasure(e.target.value)} />
-      <span style={{ color: GREY, fontSize: 13, fontWeight: 700 }}>=</span>
-      <span style={{
-        flex: 1, textAlign: 'center', fontSize: 14, fontWeight: 800, color: RED,
-      }}>{fmt(result)}</span>
-    </div>
-  )
-}
-
-// ──────────────────────────────────────────────────────────────
-// קטגוריה: חומרי קירוי (בלוקים מרובים)
-// ──────────────────────────────────────────────────────────────
-function roofingBlockTotal(b: RoofingBlock): number {
-  return b.rows.reduce((s, r) => s + num(r.qty) * num(r.length), 0)
-}
-function RoofingCategory({ blocks, onChange }: { blocks: RoofingBlock[]; onChange: (b: RoofingBlock[]) => void }) {
-  const [editing, setEditing] = useState<number | null>(null)
-
-  function addBlock() {
-    const next = [...blocks, { type: '', thickness: '', color: '', rows: [{ qty: '', length: '' }] }]
-    onChange(next)
-    setEditing(next.length - 1)
-  }
-  function patchBlock(i: number, p: Partial<RoofingBlock>) {
-    onChange(blocks.map((b, j) => (j === i ? { ...b, ...p } : b)))
-  }
-  function removeBlock(i: number) {
-    onChange(blocks.filter((_, j) => j !== i))
-    setEditing(null)
-  }
-  function finishBlock() {
-    setEditing(null)
-    if (window.confirm('להוסיף סוג קירוי נוסף?')) {
-      const next = [...blocks, { type: '', thickness: '', color: '', rows: [{ qty: '', length: '' }] }]
-      onChange(next)
-      setEditing(next.length - 1)
-    }
-  }
-
-  return (
-    <div>
-      {blocks.map((b, i) => {
-        const total = roofingBlockTotal(b)
-        if (editing !== i) {
-          return (
-            <div key={i} onClick={() => setEditing(i)} style={{
-              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-              padding: '10px 12px', border: `1px solid ${BORDER}`, borderRadius: 8,
-              marginBottom: 8, cursor: 'pointer', direction: 'rtl', background: '#FAFAFA',
-            }}>
-              <span style={{ fontSize: 13, fontWeight: 700, color: '#111' }}>
-                {b.type || 'סוג קירוי'}{b.color ? ` · ${b.color}` : ''}{b.thickness ? ` · ${b.thickness}` : ''}
-              </span>
-              <span style={{ fontSize: 13, fontWeight: 800, color: RED }}>{fmt(total)} מ"א</span>
-            </div>
-          )
-        }
-        return (
-          <div key={i} style={{ border: `1px solid ${BORDER}`, borderRadius: 8, padding: 10, marginBottom: 8 }}>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 6 }}>
-              <DeleteX onClick={() => removeBlock(i)} />
-            </div>
-            <div style={{ marginBottom: 8 }}>
-              <Dropdown value={b.type} options={ROOFING_TYPES} placeholder="סוג קירוי"
-                onChange={v => patchBlock(i, { type: v })} />
-            </div>
-            <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
-              <Dropdown value={b.thickness} options={ROOFING_THICKNESS} placeholder="עובי"
-                onChange={v => patchBlock(i, { thickness: v })} />
-              <Dropdown value={b.color} options={ROOFING_COLORS} placeholder="צבע"
-                onChange={v => patchBlock(i, { color: v })} />
-            </div>
-            {b.rows.map((r, ri) => (
-              <div key={ri} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-                <div style={{ flex: 1 }}>
-                  <QtyMeasureRow qty={r.qty} measure={r.length} measurePlaceholder="אורך"
-                    onQty={v => patchBlock(i, { rows: b.rows.map((x, j) => j === ri ? { ...x, qty: v } : x) })}
-                    onMeasure={v => patchBlock(i, { rows: b.rows.map((x, j) => j === ri ? { ...x, length: v } : x) })} />
-                </div>
-                {b.rows.length > 1 && (
-                  <DeleteX onClick={() => patchBlock(i, { rows: b.rows.filter((_, j) => j !== ri) })} />
-                )}
-              </div>
-            ))}
-            <button type="button" style={addRowBtn}
-              onClick={() => patchBlock(i, { rows: [...b.rows, { qty: '', length: '' }] })}>+ הוסף שורה</button>
-            <TotalBar label='סה"כ סוג זה' value={`${fmt(total)} מ"א`} />
-            <button type="button" onClick={finishBlock} style={{
-              width: '100%', marginTop: 10, background: RED, color: '#fff', border: 'none',
-              borderRadius: 8, padding: 11, fontSize: 14, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
-            }}>✓ סיום</button>
-          </div>
-        )
-      })}
-      <button type="button" onClick={addBlock} style={{
-        width: '100%', background: '#fff', border: `1.5px dashed ${RED}`, color: RED,
-        borderRadius: 8, padding: 10, fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
-      }}>＋ הוסף סוג קירוי</button>
-    </div>
-  )
-}
-
-// ──────────────────────────────────────────────────────────────
-// קטגוריה: עץ
-// ──────────────────────────────────────────────────────────────
-function WoodCategory({ m, patch }: { m: Materials; patch: (p: Partial<Materials>) => void }) {
-  const rows = m.wood
-  const total = rows.reduce((s, r) => s + num(r.qty) * num(r.length), 0)
-  function upd(next: WoodRow[]) { patch({ wood: next }) }
-  return (
-    <div>
-      <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
-        <Chip label="מחוטא" active={m.woodDisinfected} onClick={() => patch({ woodDisinfected: !m.woodDisinfected })} />
-        <Chip label="מוקצע" active={m.woodPlaned} onClick={() => patch({ woodPlaned: !m.woodPlaned })} />
+      <div style={{
+        fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.3,
+        background: head.bg, color: head.color, padding: '5px 12px',
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center', direction: 'rtl',
+      }}>
+        <span>{title}</span>
+        {noteEnabled && (
+          <button type="button" onClick={() => { if (open) setNotes!(id!, ''); toggleNote!(id!) }}
+            title="הערה" style={{
+              width: 20, height: 20, borderRadius: '50%', border: 'none', flexShrink: 0,
+              background: RED, color: '#fff', cursor: 'pointer', fontSize: 15, lineHeight: 1,
+              display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'inherit',
+            }}>{open ? '−' : '＋'}</button>
+        )}
       </div>
-      {rows.map((r, i) => (
-        <div key={i} style={{ border: `1px solid ${BORDER}`, borderRadius: 8, padding: 10, marginBottom: 8 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-            <Dropdown value={r.type} options={WOOD_TYPES} placeholder="סוג עץ"
-              onChange={v => upd(rows.map((x, j) => j === i ? { ...x, type: v } : x))} />
-            <DeleteX onClick={() => upd(rows.filter((_, j) => j !== i))} />
-          </div>
-          <QtyMeasureRow qty={r.qty} measure={r.length} measurePlaceholder="אורך"
-            onQty={v => upd(rows.map((x, j) => j === i ? { ...x, qty: v } : x))}
-            onMeasure={v => upd(rows.map((x, j) => j === i ? { ...x, length: v } : x))} />
-        </div>
-      ))}
-      <button type="button" style={addRowBtn}
-        onClick={() => upd([...rows, { type: '', qty: '', length: '' }])}>+ הוסף שורה</button>
-      {rows.length > 0 && <TotalBar label='סה"כ עץ' value={`${fmt(total)} מ"א`} />}
+      <div style={{ padding: 12 }}>
+        {open && (
+          <textarea dir="rtl" autoFocus placeholder="הערה…" value={notes![id!] ?? ''}
+            onChange={e => setNotes!(id!, e.target.value)}
+            style={{ ...inputStyle, height: 'auto', minHeight: 40, padding: 8, resize: 'vertical', marginBottom: 10, lineHeight: 1.4 }} />
+        )}
+        {children}
+      </div>
     </div>
   )
 }
 
-// ──────────────────────────────────────────────────────────────
-// קטגוריה גנרית: סוג + כמות × מידה (פחחות / ברזל / בידוד)
-// ──────────────────────────────────────────────────────────────
-function TypedRowsCategory({ rows, onChange, typeOptions, typePlaceholder, measurePlaceholder, totalLabel, unit }: {
-  rows: TypedRow[]; onChange: (r: TypedRow[]) => void
-  typeOptions: string[]; typePlaceholder: string; measurePlaceholder: string
-  totalLabel: string; unit: string
+// ── בלוק דינמי לפי סוג עבודה ───────────────────────────────────
+function WorkBlock({ typeKey, blocks, patch }: {
+  typeKey: string; blocks: WorkBlocks; patch: (p: Partial<WorkBlocks>) => void
 }) {
-  const total = rows.reduce((s, r) => s + num(r.qty) * num(r.measure), 0)
-  return (
-    <div>
-      {rows.map((r, i) => (
-        <div key={i} style={{ border: `1px solid ${BORDER}`, borderRadius: 8, padding: 10, marginBottom: 8 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-            <Dropdown value={r.type} options={typeOptions} placeholder={typePlaceholder}
-              onChange={v => onChange(rows.map((x, j) => j === i ? { ...x, type: v } : x))} />
-            <DeleteX onClick={() => onChange(rows.filter((_, j) => j !== i))} />
-          </div>
-          <QtyMeasureRow qty={r.qty} measure={r.measure} measurePlaceholder={measurePlaceholder}
-            onQty={v => onChange(rows.map((x, j) => j === i ? { ...x, qty: v } : x))}
-            onMeasure={v => onChange(rows.map((x, j) => j === i ? { ...x, measure: v } : x))} />
+  if (typeKey === 'asbestos') {
+    const b = blocks.asbestos
+    const set = (p: Partial<AsbestosBlock>) => patch({ asbestos: { ...b, ...p } })
+    return (
+      <>
+        <div style={grid2}>
+          <Field label="נ.צ. X"><TextInput value={b.coordX} onChange={v => set({ coordX: v })} placeholder="X" /></Field>
+          <Field label="נ.צ. Y"><TextInput value={b.coordY} onChange={v => set({ coordY: v })} placeholder="Y" /></Field>
         </div>
-      ))}
-      <button type="button" style={addRowBtn}
-        onClick={() => onChange([...rows, { type: '', qty: '', measure: '' }])}>+ הוסף שורה</button>
-      {rows.length > 0 && <TotalBar label={totalLabel} value={`${fmt(total)} ${unit}`} />}
-    </div>
-  )
-}
-
-// ──────────────────────────────────────────────────────────────
-// קטגוריה: חיפוי אלומיניום (סוג + גוון + כמות × מ׳)
-// ──────────────────────────────────────────────────────────────
-function AluminumCategory({ rows, onChange }: { rows: AlumRow[]; onChange: (r: AlumRow[]) => void }) {
-  const total = rows.reduce((s, r) => s + num(r.qty) * num(r.measure), 0)
-  return (
-    <div>
-      {rows.map((r, i) => (
-        <div key={i} style={{ border: `1px solid ${BORDER}`, borderRadius: 8, padding: 10, marginBottom: 8 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-            <Dropdown value={r.type} options={ALUM_TYPES} placeholder="סוג"
-              onChange={v => onChange(rows.map((x, j) => j === i ? { ...x, type: v } : x))} />
-            <Dropdown value={r.shade} options={ALUM_SHADES} placeholder="גוון"
-              onChange={v => onChange(rows.map((x, j) => j === i ? { ...x, shade: v } : x))} />
-            <DeleteX onClick={() => onChange(rows.filter((_, j) => j !== i))} />
-          </div>
-          <QtyMeasureRow qty={r.qty} measure={r.measure} measurePlaceholder='מ׳'
-            onQty={v => onChange(rows.map((x, j) => j === i ? { ...x, qty: v } : x))}
-            onMeasure={v => onChange(rows.map((x, j) => j === i ? { ...x, measure: v } : x))} />
+        <div style={{ marginBottom: 8 }}>
+          <Field label="למה משמש"><TextInput value={b.usedFor} onChange={v => set({ usedFor: v })} placeholder="שימוש המבנה" /></Field>
         </div>
-      ))}
-      <button type="button" style={addRowBtn}
-        onClick={() => onChange([...rows, { type: '', shade: '', qty: '', measure: '' }])}>+ הוסף שורה</button>
-      {rows.length > 0 && <TotalBar label='סה"כ אלומיניום' value={`${fmt(total)} מ׳`} />}
-    </div>
-  )
-}
-
-// ──────────────────────────────────────────────────────────────
-// קטגוריה: שונות (פריט + הערה)
-// ──────────────────────────────────────────────────────────────
-function MiscCategory({ rows, onChange }: { rows: MiscRow[]; onChange: (r: MiscRow[]) => void }) {
-  return (
-    <div>
-      {rows.map((r, i) => (
-        <div key={i} style={{ border: `1px solid ${BORDER}`, borderRadius: 8, padding: 10, marginBottom: 8 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-            <Dropdown value={r.item} options={MISC_ITEMS} placeholder="פריט"
-              onChange={v => onChange(rows.map((x, j) => j === i ? { ...x, item: v } : x))} />
-            <DeleteX onClick={() => onChange(rows.filter((_, j) => j !== i))} />
-          </div>
-          <input style={inputStyle} placeholder="הערה חופשית" value={r.note}
-            onChange={e => onChange(rows.map((x, j) => j === i ? { ...x, note: e.target.value } : x))} />
+        <div style={grid2}>
+          <Field label="תקרה"><SelectBox value={b.ceiling} onChange={v => set({ ceiling: v })} options={CEILING_OPTS} /></Field>
+          <Field label="קונסטרוקציה"><TextInput value={b.ceilingConstruction} onChange={v => set({ ceilingConstruction: v })} placeholder="קונסטרוקציה" /></Field>
         </div>
-      ))}
-      <button type="button" style={addRowBtn}
-        onClick={() => onChange([...rows, { item: '', note: '' }])}>+ הוסף פריט</button>
-    </div>
-  )
-}
-
-// ──────────────────────────────────────────────────────────────
-// תקצירי קטגוריות (מוצגים ליד הכותרת כשמכווצת)
-// ──────────────────────────────────────────────────────────────
-function categorySummary(key: string, m: Materials): string {
-  switch (key) {
-    case 'roofing': {
-      const total = m.roofing.reduce((s, b) => s + roofingBlockTotal(b), 0)
-      if (!m.roofing.length) return ''
-      const types = m.roofing.map(b => b.type).filter(Boolean)
-      return `${types.length ? types.join(', ') + ' · ' : ''}${fmt(total)} מ"א`
-    }
-    case 'wood': {
-      if (!m.wood.length) return ''
-      const total = m.wood.reduce((s, r) => s + num(r.qty) * num(r.length), 0)
-      const tags = [m.woodDisinfected && 'מחוטא', m.woodPlaned && 'מוקצע'].filter(Boolean).join(', ')
-      return `${m.wood.length} פריטים · ${fmt(total)} מ"א${tags ? ' · ' + tags : ''}`
-    }
-    case 'flashing': {
-      if (!m.flashing.length) return ''
-      const total = m.flashing.reduce((s, r) => s + num(r.qty) * num(r.measure), 0)
-      return `${m.flashing.length} שורות · ${fmt(total)} מ"א`
-    }
-    case 'aluminum': {
-      if (!m.aluminum.length) return ''
-      const total = m.aluminum.reduce((s, r) => s + num(r.qty) * num(r.measure), 0)
-      const shades = Array.from(new Set(m.aluminum.map(r => r.shade).filter(Boolean)))
-      return `${shades.length ? shades.join(', ') + ' · ' : ''}${fmt(total)} מ׳`
-    }
-    case 'iron': {
-      if (!m.iron.length) return ''
-      const total = m.iron.reduce((s, r) => s + num(r.qty) * num(r.measure), 0)
-      return `${m.iron.length} שורות · ${fmt(total)} מ"א`
-    }
-    case 'insulation': {
-      if (!m.insulation.length) return ''
-      const total = m.insulation.reduce((s, r) => s + num(r.qty) * num(r.measure), 0)
-      return `${m.insulation.length} שורות · ${fmt(total)} מ"ר`
-    }
-    case 'misc':
-      return m.misc.length ? `${m.misc.length} פריטים` : ''
-    default:
-      return ''
+        <div style={grid2}>
+          <Field label="מקל סבא"><TextInput value={b.grandpaStick} onChange={v => set({ grandpaStick: v })} placeholder="מקל סבא" /></Field>
+          <Field label="ריק"><TextInput value={b.empty} onChange={v => set({ empty: v })} placeholder="ריק" /></Field>
+        </div>
+        <Field label="מבנים רגישים"><TextArea value={b.sensitive} onChange={v => set({ sensitive: v })} placeholder="מבנים רגישים בסביבה" /></Field>
+      </>
+    )
   }
+  if (typeKey === 'roofReplace') {
+    const b = blocks.roofReplace
+    const set = (p: Partial<RoofReplaceBlock>) => patch({ roofReplace: { ...b, ...p } })
+    return (
+      <>
+        <div style={grid2}>
+          <Field label="גג קיים"><TextInput value={b.existingRoof} onChange={v => set({ existingRoof: v })} placeholder="גג קיים" /></Field>
+          <Field label="גג חדש"><TextInput value={b.newRoof} onChange={v => set({ newRoof: v })} placeholder="גג חדש" /></Field>
+        </div>
+        <div style={grid2}>
+          <Field label="קונסטרוקציה"><TextInput value={b.construction} onChange={v => set({ construction: v })} placeholder="קונסטרוקציה" /></Field>
+          <Field label="שיפוע"><TextInput value={b.slope} onChange={v => set({ slope: v })} placeholder="שיפוע" /></Field>
+        </div>
+        <div style={{ marginBottom: 8 }}>
+          <Field label="בליטה מהפטות"><TextInput value={b.overhang} onChange={v => set({ overhang: v })} placeholder="בליטה מהפטות" /></Field>
+        </div>
+        <div style={grid2}>
+          <Field label="סוג פח"><SelectBox value={b.panelType} onChange={v => set({ panelType: v })} options={PANEL_OPTS} /></Field>
+          {b.panelType === 'איסכורית' && <Field label="עובי פח"><TextInput value={b.thickness1} onChange={v => set({ thickness1: v })} placeholder="עובי" /></Field>}
+          {b.panelType === 'פנל מבודד' && <Field label="עובי חיצוני"><TextInput value={b.thickness1} onChange={v => set({ thickness1: v })} placeholder="עובי חיצוני" /></Field>}
+        </div>
+        {b.panelType === 'פנל מבודד' && (
+          <div style={{ marginBottom: 8 }}>
+            <Field label="עובי כולל"><TextInput value={b.thickness2} onChange={v => set({ thickness2: v })} placeholder="עובי כולל" /></Field>
+          </div>
+        )}
+      </>
+    )
+  }
+  if (typeKey === 'aluminum') {
+    const b = blocks.aluminum
+    const set = (p: Partial<AluminumBlock>) => patch({ aluminum: { ...b, ...p } })
+    return (
+      <>
+        <div style={grid2}>
+          <Field label="גוון"><SelectBox value={b.shade} onChange={v => set({ shade: v })} options={ALUM_SHADES} /></Field>
+          <Field label="מטרים"><TextInput type="number" value={b.meters} onChange={v => set({ meters: v })} placeholder="מ׳" /></Field>
+        </div>
+        <Field label="מיקום"><ChipGroup options={['פנים', 'תקרה']} value={b.coating} onChange={v => set({ coating: v })} /></Field>
+      </>
+    )
+  }
+  if (typeKey === 'gutters') {
+    const b = blocks.gutters
+    const set = (p: Partial<GuttersBlock>) => patch({ gutters: { ...b, ...p } })
+    return (
+      <>
+        <div style={{ marginBottom: 8 }}>
+          <Field label="סוג"><SelectBox value={b.type} onChange={v => set({ type: v })} options={GUTTER_TYPES} /></Field>
+        </div>
+        <div style={grid2}>
+          <Field label="מרזבים (מ׳)"><TextInput type="number" value={b.guttersM} onChange={v => set({ guttersM: v })} placeholder="מ׳" /></Field>
+          <Field label="מקטעים"><TextInput type="number" value={b.guttersSegments} onChange={v => set({ guttersSegments: v })} placeholder="מקטעים" /></Field>
+        </div>
+        <div style={grid2}>
+          <Field label="ירידות (יח׳)"><TextInput type="number" value={b.downUnits} onChange={v => set({ downUnits: v })} placeholder="יח׳" /></Field>
+          <Field label="מקטעים"><TextInput type="number" value={b.downSegments} onChange={v => set({ downSegments: v })} placeholder="מקטעים" /></Field>
+        </div>
+      </>
+    )
+  }
+  if (typeKey === 'insulation') {
+    const b = blocks.insulation
+    const set = (p: Partial<InsulationBlock>) => patch({ insulation: { ...b, ...p } })
+    return (
+      <>
+        <div style={{ marginBottom: 8 }}>
+          <Field label="סוג"><TextInput value={b.type} onChange={v => set({ type: v })} placeholder="סוג בידוד" /></Field>
+        </div>
+        <div style={grid2}>
+          <Field label="שטח (מ״ר)"><TextInput type="number" value={b.area} onChange={v => set({ area: v })} placeholder="מ״ר" /></Field>
+          <Field label="עובי"><TextInput value={b.thickness} onChange={v => set({ thickness: v })} placeholder="עובי" /></Field>
+        </div>
+      </>
+    )
+  }
+  // other
+  const b = blocks.other
+  return <Field label="פירוט"><TextArea value={b.note} onChange={v => patch({ other: { note: v } })} placeholder="פירוט העבודה" /></Field>
 }
 
-function hasAnyContent(m: Materials): boolean {
-  return m.roofing.length > 0 || m.wood.length > 0 || m.flashing.length > 0 ||
-    m.aluminum.length > 0 || m.iron.length > 0 || m.insulation.length > 0 || m.misc.length > 0
+// ── כרטיסיית קטגוריית חומרים ───────────────────────────────────
+function MaterialCategoryCard({ catKey, cat, onChange, onRemove }: {
+  catKey: string; cat: MaterialCategory; onChange: (c: MaterialCategory) => void; onRemove: () => void
+}) {
+  const meta = CATEGORY_META[catKey]
+  const total = cat.rows.reduce((s, r) => s + num(r.qty) * num(r.measure), 0)
+  function setRow(i: number, p: Partial<MaterialRow>) {
+    onChange({ ...cat, rows: cat.rows.map((r, j) => j === i ? { ...r, ...p } : r) })
+  }
+  return (
+    <div style={{ background: '#fff', margin: '6px 8px', borderRadius: 10, boxShadow: '0 1px 3px rgba(0,0,0,0.07)', overflow: 'hidden' }}>
+      <div style={{
+        background: meta.head, color: meta.color, padding: '6px 12px',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between', direction: 'rtl',
+      }}>
+        <span style={{ width: 20 }} />
+        <span style={{ fontSize: 13, fontWeight: 800 }}>{meta.label}</span>
+        <button type="button" onClick={onRemove} title="הסר קטגוריה" style={{
+          width: 20, height: 20, borderRadius: '50%', border: `1px solid ${meta.color}`,
+          background: 'transparent', color: meta.color, cursor: 'pointer', fontSize: 15, lineHeight: 1,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'inherit',
+        }}>−</button>
+      </div>
+      <div style={{ padding: 10 }}>
+        {meta.roofSub && (
+          <div style={grid2}>
+            <Field label="עובי"><TextInput value={cat.thickness} onChange={v => onChange({ ...cat, thickness: v })} placeholder="עובי" /></Field>
+            <Field label="צבע"><TextInput value={cat.color} onChange={v => onChange({ ...cat, color: v })} placeholder="צבע" /></Field>
+          </div>
+        )}
+        {cat.rows.map((r, i) => (
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 8, direction: 'rtl' }}>
+            <input dir="rtl" style={{ ...inputStyle, flex: meta.hasShade ? 1.3 : 2 }} placeholder="סוג"
+              value={r.type} onChange={e => setRow(i, { type: e.target.value })} />
+            {meta.hasShade && (
+              <input dir="rtl" style={{ ...inputStyle, flex: 1.1 }} placeholder="גוון"
+                value={r.shade} onChange={e => setRow(i, { shade: e.target.value })} />
+            )}
+            <input dir="rtl" type="number" inputMode="numeric" style={{ ...inputStyle, flex: 0.8, padding: '0 6px' }} placeholder="יח׳"
+              value={r.qty} onChange={e => setRow(i, { qty: e.target.value })} />
+            <span style={{ color: GREY, fontWeight: 800, fontSize: 12 }}>×</span>
+            <input dir="rtl" type="number" inputMode="decimal" style={{ ...inputStyle, flex: 0.8, padding: '0 6px' }} placeholder={meta.unit}
+              value={r.measure} onChange={e => setRow(i, { measure: e.target.value })} />
+            <span style={{ color: GREY, fontWeight: 800, fontSize: 12 }}>=</span>
+            <span style={{ flex: 0.8, textAlign: 'center', fontSize: 13, fontWeight: 800, color: meta.color }}>{fmt(num(r.qty) * num(r.measure))}</span>
+            <button type="button" onClick={() => onChange({ ...cat, rows: cat.rows.filter((_, j) => j !== i) })}
+              disabled={cat.rows.length <= 1} style={{
+                background: 'none', border: 'none', color: cat.rows.length <= 1 ? '#DDD' : GREY,
+                cursor: cat.rows.length <= 1 ? 'default' : 'pointer', fontSize: 18, lineHeight: 1, padding: '0 2px', fontFamily: 'inherit',
+              }}>×</button>
+          </div>
+        ))}
+        <button type="button" onClick={() => onChange({ ...cat, rows: [...cat.rows, { type: '', shade: '', qty: '', measure: '' }] })}
+          style={{ background: 'none', border: 'none', color: meta.color, fontSize: 13, fontWeight: 800, cursor: 'pointer', padding: '4px 0', fontFamily: 'inherit' }}>
+          ＋ הוסף שורה
+        </button>
+        <div style={{
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6,
+          padding: '7px 10px', border: `1.5px solid ${meta.color}`, borderRadius: 8, direction: 'rtl',
+        }}>
+          <span style={{ fontSize: 12, fontWeight: 700, color: '#111' }}>סה״כ {meta.label}</span>
+          <span style={{ fontSize: 14, fontWeight: 800, color: meta.color }}>{fmt(total)} {meta.unit}</span>
+        </div>
+      </div>
+    </div>
+  )
 }
 
-// ──────────────────────────────────────────────────────────────
+// ── סקשן תיעוד ─────────────────────────────────────────────────
+function DocSection({ icon, title, subtitle, items, onAdd, onRemove, onNote, uploading }: {
+  icon: string; title: string; subtitle: string; items: DocItem[]
+  onAdd: (files: FileList) => void; onRemove: (i: number) => void
+  onNote: (i: number, note: string, open: boolean) => void; uploading: boolean
+}) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  return (
+    <div style={{ background: '#fff', margin: '6px 8px', borderRadius: 10, boxShadow: '0 1px 3px rgba(0,0,0,0.07)', overflow: 'hidden' }}>
+      <div style={{ background: '#F8F8F8', padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8, direction: 'rtl' }}>
+        <span style={{ fontSize: 18 }}>{icon}</span>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 13, fontWeight: 800, color: '#333' }}>{title}</div>
+          <div style={{ fontSize: 10, color: '#777' }}>{subtitle}</div>
+        </div>
+        <span style={{ fontSize: 12, fontWeight: 700, color: GREY }}>{items.length}</span>
+      </div>
+      <div style={{ padding: 12, display: 'flex', flexWrap: 'wrap', gap: 8, direction: 'rtl' }}>
+        {items.map((it, i) => (
+          <div key={i} style={{ width: 64 }}>
+            <div style={{ position: 'relative', width: 64, height: 64, borderRadius: 8, overflow: 'hidden', border: `1px solid ${BORDER}`, background: '#F5F5F5' }}>
+              {it.url
+                ? <img src={it.url} alt={it.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                : <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 22 }}>📄</div>}
+              <button type="button" onClick={() => onRemove(i)} style={{
+                position: 'absolute', top: 2, left: 2, width: 18, height: 18, borderRadius: '50%',
+                background: 'rgba(0,0,0,0.6)', color: '#fff', border: 'none', cursor: 'pointer', fontSize: 12, lineHeight: 1, fontFamily: 'inherit',
+              }}>×</button>
+              <button type="button" onClick={() => onNote(i, it.note, !it.noteOpen)} title="הערה" style={{
+                position: 'absolute', bottom: 2, right: 2, width: 18, height: 18, borderRadius: '50%',
+                background: it.note ? RED : 'rgba(0,0,0,0.6)', color: '#fff', border: 'none', cursor: 'pointer', fontSize: 10, lineHeight: 1, fontFamily: 'inherit',
+              }}>💬</button>
+            </div>
+            {it.noteOpen && (
+              <input dir="rtl" autoFocus value={it.note} placeholder="הערה" onChange={e => onNote(i, e.target.value, true)}
+                style={{ ...inputStyle, height: 28, fontSize: 11, marginTop: 4, padding: '0 6px' }} />
+            )}
+          </div>
+        ))}
+        <button type="button" onClick={() => inputRef.current?.click()} disabled={uploading} style={{
+          width: 64, height: 64, borderRadius: 8, border: `1.5px dashed ${RED}`, background: '#fff',
+          color: RED, cursor: uploading ? 'default' : 'pointer', fontSize: 26, lineHeight: 1, fontFamily: 'inherit',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>{uploading ? '…' : '＋'}</button>
+        <input ref={inputRef} type="file" accept="image/*" multiple style={{ display: 'none' }}
+          onChange={e => { if (e.target.files?.length) onAdd(e.target.files); e.target.value = '' }} />
+      </div>
+    </div>
+  )
+}
+
+// ══════════════════════════════════════════════════════════════
 // הקומפוננטה הראשית
-// ──────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════
+type TabKey = 'details' | 'docs' | 'materials'
+
 export default function NewExecutionSheet() {
   const navigate = useNavigate()
   const { profile } = useAuth()
   const { id: editId } = useParams<{ id: string }>()
 
+  const [tab, setTab] = useState<TabKey>('details')
   const [loading, setLoading] = useState(!!editId)
   const [saving, setSaving] = useState(false)
   const [flash, setFlash] = useState<string | null>(null)
+  const [uploading, setUploading] = useState(false)
+  const [notesOpen, setNotesOpen] = useState<Set<string>>(new Set())
+  const [form, setForm] = useState<SheetForm>(emptyForm())
 
-  const [projectName, setProjectName] = useState('')
-  const [sheetDate, setSheetDate] = useState(todayISO())
-  const [materials, setMaterials] = useState<Materials>(emptyMaterials())
-  const [openKeys, setOpenKeys] = useState<Set<string>>(new Set())
-
-  // מזהה הדף — נשמר גם ב-ref כדי שהשמירה האוטומטית תראה ערך עדכני
-  const [sheetId, setSheetId] = useState<string | null>(null)
   const sheetIdRef = useRef<string | null>(null)
-
-  // תמונת מצב עדכנית לשימוש בתוך ה-interval של השמירה האוטומטית
-  const latest = useRef({ projectName, sheetDate, materials })
-  latest.current = { projectName, sheetDate, materials }
+  const latest = useRef(form); latest.current = form
   const savingRef = useRef(false)
   const lastErrRef = useRef<string | null>(null)
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
-  function patchMat(p: Partial<Materials>) { setMaterials(prev => ({ ...prev, ...p })) }
-  function toggleOpen(key: string) {
-    setOpenKeys(prev => {
-      const next = new Set(prev)
-      if (next.has(key)) next.delete(key); else next.add(key)
-      return next
+  // ── מעדכני state ──────────────────────────────────────────────
+  const patch = useCallback((p: Partial<SheetForm>) => setForm(f => ({ ...f, ...p })), [])
+  const patchDetails = (p: Partial<DetailsTab>) => setForm(f => ({ ...f, details: { ...f.details, ...p } }))
+  const patchGeneral = (p: Partial<GeneralProps>) => setForm(f => ({ ...f, general: { ...f.general, ...p } }))
+  const patchLogistics = (p: Partial<Logistics>) => setForm(f => ({ ...f, logistics: { ...f.logistics, ...p } }))
+  const patchBlocks = (p: Partial<WorkBlocks>) => setForm(f => ({ ...f, blocks: { ...f.blocks, ...p } }))
+  const setNote = (k: string, v: string) => setForm(f => ({ ...f, notes: { ...f.notes, [k]: v } }))
+  const toggleNote = (k: string) => setNotesOpen(prev => { const n = new Set(prev); n.has(k) ? n.delete(k) : n.add(k); return n })
+
+  function toggleWorkType(key: string) {
+    setForm(f => {
+      const on = f.workTypes.includes(key)
+      const workTypes = on ? f.workTypes.filter(k => k !== key) : [...f.workTypes, key]
+      // סנכרון קטגוריות חומרים נגזרות (הוספה בלבד — הסרה ידנית)
+      const derived = derivedCategories(workTypes)
+      const active = [...f.materials.active]
+      const data = { ...f.materials.data }
+      derived.forEach(k => { if (!active.includes(k)) { active.push(k); data[k] = data[k] ?? emptyCategory() } })
+      const ordered = CATEGORY_ORDER.filter(k => active.includes(k))
+      return { ...f, workTypes, materials: { active: ordered, data } }
     })
   }
-  function deleteCategory(key: string) {
-    setMaterials(prev => ({ ...prev, hidden: Array.from(new Set([...prev.hidden, key])) }))
-    setOpenKeys(prev => { const n = new Set(prev); n.delete(key); return n })
-  }
-  function restoreCategory(key: string) {
-    setMaterials(prev => ({ ...prev, hidden: prev.hidden.filter(k => k !== key) }))
-  }
 
-  // ── טעינת דף קיים לעריכה ──────────────────────────────────
+  // ── טעינת דף קיים ─────────────────────────────────────────────
   useEffect(() => {
     if (!editId) return
     let cancelled = false
     ;(async () => {
       const { data: sheet } = await supabase.from('execution_sheets').select('*').eq('id', editId).single()
       if (cancelled) return
-      if (sheet) {
-        setSheetId(sheet.id); sheetIdRef.current = sheet.id
-        setProjectName(sheet.project_name ?? '')
-        setSheetDate(sheet.sheet_date ?? todayISO())
-      }
-      const { data: bs } = await supabase.from('buildings')
-        .select('*').eq('sheet_id', editId).order('building_number').limit(1)
+      if (sheet) { sheetIdRef.current = sheet.id }
+      const { data: bs } = await supabase.from('buildings').select('*').eq('sheet_id', editId).order('building_number').limit(1)
       if (cancelled) return
       const b = bs?.[0]
-      if (b?.materials) {
-        const mm = b.materials as Partial<Materials>
-        setMaterials({ ...emptyMaterials(), ...mm })
+      const wc = (b?.work_content ?? {}) as Partial<SheetForm>
+      const base = emptyForm()
+      const merged: SheetForm = {
+        details: { ...base.details, ...(wc.details ?? {}), date: sheet?.sheet_date ?? wc.details?.date ?? todayISO(), fillerName: wc.details?.fillerName ?? sheet?.filled_by_name ?? '', customerName: wc.details?.customerName ?? sheet?.project_name ?? '' },
+        general: { ...base.general, ...(wc.general ?? {}) },
+        logistics: { ...base.logistics, ...(wc.logistics ?? {}) },
+        workTypes: wc.workTypes ?? (b?.work_types ?? []),
+        blocks: { ...emptyBlocks(), ...(wc.blocks ?? {}) },
+        materials: (b?.materials && (b.materials as MaterialsState).active) ? (b.materials as MaterialsState) : base.materials,
+        documentation: { ...base.documentation, ...(wc.documentation ?? {}) },
+        notes: wc.notes ?? {},
       }
-      setLoading(false)
+      // חתימות URL מחדש לתמונות (bucket פרטי)
+      for (const sec of ['photos', 'sketch', 'documents'] as const) {
+        const arr = merged.documentation[sec]
+        for (const it of arr) {
+          if (it.path) {
+            const { data: signed } = await supabase.storage.from('sheet-images').createSignedUrl(it.path, 60 * 60 * 24 * 365)
+            it.url = signed?.signedUrl ?? it.url
+          }
+          it.noteOpen = false
+        }
+      }
+      if (!cancelled) { setForm(merged); setLoading(false) }
     })()
     return () => { cancelled = true }
   }, [editId])
 
-  // ── שמירה ל-Supabase ──────────────────────────────────────
+  // ── שמירה ל-Supabase ──────────────────────────────────────────
   async function persist(status: 'field' | 'submitted'): Promise<string | null> {
     lastErrRef.current = null
-    const cur = latest.current
-
-    // מדיניות ה-RLS על execution_sheets דורשת auth.uid() = created_by.
-    // שולפים את מזהה המשתמש ישירות מהסשן (ולא מ-profile שעלול להיות null
-    // בשמירה אוטומטית / לפני שהפרופיל נטען) כדי להבטיח התאמה.
+    const f = latest.current
     const { data: { session } } = await supabase.auth.getSession()
     const uid = session?.user?.id ?? null
-    if (!uid) {
-      console.error('[sheet] persist: אין סשן פעיל — auth.uid() ריק, השמירה תיכשל על RLS')
-      lastErrRef.current = 'החיבור פג. התחבר מחדש ונסה שוב.'
-      return null
-    }
+    if (!uid) { lastErrRef.current = 'החיבור פג. התחבר מחדש ונסה שוב.'; return null }
 
+    const projectName = f.details.customerName.trim() || f.details.address.trim() || 'דף ביצוע — ללא שם'
     const payload = {
-      project_name: cur.projectName.trim() || 'בניית גג — ללא שם',
-      sheet_date: cur.sheetDate || todayISO(),
+      project_name: projectName,
+      sheet_date: f.details.date || todayISO(),
       num_buildings: 1,
       filled_by: uid,
-      filled_by_name: profile?.full_name ?? '',
+      filled_by_name: f.details.fillerName || profile?.full_name || '',
       created_by: uid,
       status,
       updated_at: new Date().toISOString(),
@@ -584,48 +609,48 @@ export default function NewExecutionSheet() {
     let sid = sheetIdRef.current
     if (sid) {
       const { error } = await supabase.from('execution_sheets').update(payload).eq('id', sid)
-      if (error) {
-        console.error('[sheet] עדכון execution_sheets נכשל:', JSON.stringify(error), error)
-        lastErrRef.current = `שמירה נכשלה: ${error.message}`
-        return null
-      }
+      if (error) { lastErrRef.current = `שמירה נכשלה: ${error.message}`; return null }
     } else {
       const { data, error } = await supabase.from('execution_sheets').insert(payload).select('id').single()
-      if (error || !data) {
-        console.error('[sheet] יצירת execution_sheets נכשלה:', JSON.stringify(error), error)
-        lastErrRef.current = `שמירה נכשלה: ${error?.message ?? 'שגיאה לא ידועה'}`
-        return null
-      }
-      sid = data.id
-      sheetIdRef.current = sid
-      setSheetId(sid)
+      if (error || !data) { lastErrRef.current = `שמירה נכשלה: ${error?.message ?? 'שגיאה'}`; return null }
+      sid = data.id; sheetIdRef.current = sid
     }
 
-    // מבנה יחיד (בניית גג) — כל החומרים ב-jsonb
+    // work_content jsonb — כל הטופס; materials jsonb — לשונית חומרים (שמור לוגיקה קיימת)
     const buildingPayload = {
       sheet_id: sid,
       building_number: 1,
-      building_name: 'בניית גג',
-      work_types: [WORK_TYPE],
-      structure_type: ['עץ', 'מתכת'],
-      needs_crane: false,
-      work_content: {},
-      materials: cur.materials,
+      building_name: f.details.customerName || 'מבנה 1',
+      work_types: f.workTypes,
+      structure_type: f.general.construction ? [f.general.construction] : [],
+      needs_crane: f.logistics.crane !== '' && f.logistics.crane !== 'לא נדרש',
+      needs_container: f.logistics.container !== '' && f.logistics.container !== 'לא נדרש',
+      work_content: {
+        details: f.details, general: f.general, logistics: f.logistics,
+        workTypes: f.workTypes, blocks: f.blocks,
+        documentation: {
+          photos: f.documentation.photos.map(stripDoc),
+          sketch: f.documentation.sketch.map(stripDoc),
+          documents: f.documentation.documents.map(stripDoc),
+        },
+        notes: f.notes,
+      },
+      materials: f.materials,
     }
-    const { data: existing, error: selErr } = await supabase.from('buildings')
-      .select('id').eq('sheet_id', sid).eq('building_number', 1).limit(1)
-    if (selErr) console.error('[sheet] שליפת building נכשלה:', JSON.stringify(selErr))
+    const { data: existing } = await supabase.from('buildings').select('id').eq('sheet_id', sid).eq('building_number', 1).limit(1)
     const bRes = existing?.[0]?.id
       ? await supabase.from('buildings').update(buildingPayload).eq('id', existing[0].id)
       : await supabase.from('buildings').insert(buildingPayload)
-    if (bRes.error) {
-      console.error('[sheet] שמירת building נכשלה:', JSON.stringify(bRes.error), bRes.error)
-      lastErrRef.current = `שמירת החומרים נכשלה: ${bRes.error.message}`
-      return null
-    }
-    // ניקוי מבנים עודפים במקרה של דף ישן מרובה-מבנים
+    if (bRes.error) { lastErrRef.current = `שמירת התוכן נכשלה: ${bRes.error.message}`; return null }
     await supabase.from('buildings').delete().eq('sheet_id', sid).gt('building_number', 1)
     return sid
+  }
+  // לא שומרים signed-url (זמני) ב-DB — רק path/name/note
+  function stripDoc(it: DocItem) { return { path: it.path, name: it.name, note: it.note, url: '', noteOpen: false } }
+
+  async function ensureSheetId(): Promise<string | null> {
+    if (sheetIdRef.current) return sheetIdRef.current
+    return await persist('field')
   }
 
   async function saveDraft() {
@@ -633,35 +658,81 @@ export default function NewExecutionSheet() {
     savingRef.current = true; setSaving(true)
     try {
       const sid = await persist('field')
-      if (sid) { setFlash('נשמר ✓'); setTimeout(() => setFlash(null), 1800) }
-      else alert(lastErrRef.current ?? 'השמירה נכשלה — בדוק את החיבור ונסה שוב')
+      if (sid) { setFlash('נשמר ✓'); setTimeout(() => setFlash(null), 1600) }
+      else alert(lastErrRef.current ?? 'השמירה נכשלה')
     } finally { savingRef.current = false; setSaving(false) }
   }
-
   async function submit() {
     if (savingRef.current) return
     savingRef.current = true; setSaving(true)
     try {
       const sid = await persist('submitted')
       if (sid) { alert('✓ הדף נשמר ואושר בהצלחה'); navigate('/sheets') }
-      else alert(lastErrRef.current ?? 'השמירה נכשלה — בדוק את החיבור ונסה שוב')
+      else alert(lastErrRef.current ?? 'השמירה נכשלה')
     } finally { savingRef.current = false; setSaving(false) }
   }
 
-  // ── שמירה אוטומטית כל 30 שניות ──────────────────────────────
+  // ── שמירה אוטומטית debounce 2s ────────────────────────────────
+  function meaningful(f: SheetForm): boolean {
+    return f.details.customerName.trim().length > 0 || f.details.address.trim().length > 0 || f.workTypes.length > 0
+  }
   useEffect(() => {
-    const t = setInterval(() => {
-      const cur = latest.current
-      const meaningful = cur.projectName.trim().length > 0 || hasAnyContent(cur.materials)
-      if (meaningful && !savingRef.current) {
-        persist('field').then(sid => {
-          if (sid) { setFlash('נשמר אוטומטית ✓'); setTimeout(() => setFlash(null), 1500) }
-        })
-      }
-    }, 30000)
-    return () => clearInterval(t)
+    if (loading) return
+    if (!meaningful(form)) return
+    clearTimeout(saveTimer.current)
+    saveTimer.current = setTimeout(() => {
+      if (savingRef.current) return
+      persist('field').then(sid => { if (sid) { setFlash('נשמר אוטומטית ✓'); setTimeout(() => setFlash(null), 1300) } })
+    }, AUTOSAVE_MS)
+    return () => clearTimeout(saveTimer.current)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [form, loading])
+
+  // ── העלאת קבצים ל-storage: sheet-images ───────────────────────
+  async function uploadDocs(section: keyof Documentation, files: FileList) {
+    setUploading(true)
+    try {
+      const sid = await ensureSheetId()
+      if (!sid) { alert(lastErrRef.current ?? 'צריך לשמור את הדף לפני העלאה'); return }
+      const added: DocItem[] = []
+      for (const file of Array.from(files)) {
+        const safe = file.name.replace(/[^\w.\-]/g, '_')
+        const path = `${sid}/${section}/${Date.now()}_${safe}`
+        const { error } = await supabase.storage.from('sheet-images').upload(path, file, { upsert: true })
+        if (error) { console.error('[sheet] upload נכשל:', error.message); continue }
+        const { data: signed } = await supabase.storage.from('sheet-images').createSignedUrl(path, 60 * 60 * 24 * 365)
+        added.push({ path, url: signed?.signedUrl ?? '', name: file.name, note: '', noteOpen: false })
+      }
+      if (added.length) {
+        setForm(f => ({ ...f, documentation: { ...f.documentation, [section]: [...f.documentation[section], ...added] } }))
+      }
+    } finally { setUploading(false) }
+  }
+  function removeDoc(section: keyof Documentation, idx: number) {
+    setForm(f => {
+      const item = f.documentation[section][idx]
+      if (item?.path) supabase.storage.from('sheet-images').remove([item.path])
+      return { ...f, documentation: { ...f.documentation, [section]: f.documentation[section].filter((_, i) => i !== idx) } }
+    })
+  }
+  function setDocNote(section: keyof Documentation, idx: number, note: string, open: boolean) {
+    setForm(f => ({ ...f, documentation: { ...f.documentation, [section]: f.documentation[section].map((it, i) => i === idx ? { ...it, note, noteOpen: open } : it) } }))
+  }
+
+  // ── קטגוריות חומרים ───────────────────────────────────────────
+  function setCategory(key: string, c: MaterialCategory) {
+    setForm(f => ({ ...f, materials: { ...f.materials, data: { ...f.materials.data, [key]: c } } }))
+  }
+  function removeCategory(key: string) {
+    setForm(f => ({ ...f, materials: { ...f.materials, active: f.materials.active.filter(k => k !== key) } }))
+  }
+  function addCategory(key: string) {
+    setForm(f => {
+      if (f.materials.active.includes(key)) return f
+      const active = CATEGORY_ORDER.filter(k => f.materials.active.includes(k) || k === key)
+      return { ...f, materials: { active, data: { ...f.materials.data, [key]: f.materials.data[key] ?? emptyCategory() } } }
+    })
+  }
 
   if (loading) {
     return (
@@ -672,126 +743,190 @@ export default function NewExecutionSheet() {
     )
   }
 
-  const visibleCats = CATEGORIES.filter(c => !materials.hidden.includes(c.key))
-  const hiddenCats = CATEGORIES.filter(c => materials.hidden.includes(c.key))
+  const subtitle = form.details.address.trim() || form.details.customerName.trim() || 'דף חדש'
+  const inactiveCats = CATEGORY_ORDER.filter(k => !form.materials.active.includes(k))
+  const noteProps = { notes: form.notes, setNotes: setNote, notesOpen, toggleNote }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: BG, fontFamily: 'Heebo, sans-serif' }}>
+    <div dir="rtl" className="esheet" style={{ display: 'flex', flexDirection: 'column', height: '100%', background: BG, fontFamily: 'Heebo, sans-serif' }}>
+      <style>{'.esheet input::placeholder,.esheet textarea::placeholder{color:#555;opacity:1}'}</style>
+
       {/* Header */}
-      <div style={{ background: RED, padding: '14px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
-        <button onClick={() => navigate('/sheets')} title="סגור"
-          style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, lineHeight: 0 }}>
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+      <div style={{ background: RED, padding: '8px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+        <button onClick={() => navigate('/sheets')} title="סגור" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, lineHeight: 0 }}>
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
             <line x1="6" y1="6" x2="18" y2="18" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" />
             <line x1="18" y1="6" x2="6" y2="18" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" />
           </svg>
         </button>
-        <span style={{ color: '#fff', fontSize: 18, fontWeight: 700 }}>{editId ? 'עריכת דף ביצוע' : 'דף ביצוע חדש'}</span>
-        <span style={{ width: 32 }} />
+        <div style={{ flex: 1, display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: 8, minWidth: 0 }}>
+          <span style={{ color: '#fff', fontSize: 16, fontWeight: 800, flexShrink: 0 }}>דף ביצוע</span>
+          <span style={{ color: 'rgba(255,255,255,0.85)', fontSize: 12, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{subtitle}</span>
+        </div>
+        <span style={{ width: 30 }} />
+      </div>
+
+      {/* Tabs */}
+      <div style={{ display: 'flex', background: BG, flexShrink: 0, borderBottom: `1px solid ${BORDER}` }}>
+        {([['details', 'פרטים'], ['docs', 'תיעוד'], ['materials', 'חומרים']] as [TabKey, string][]).map(([key, label]) => (
+          <button key={key} onClick={() => setTab(key)} style={{
+            flex: 1, height: 26, border: 'none', background: 'none', cursor: 'pointer', fontFamily: 'inherit',
+            fontSize: 13, fontWeight: tab === key ? 800 : 500, color: tab === key ? RED : '#888',
+            borderBottom: tab === key ? `2px solid ${RED}` : '2px solid transparent',
+          }}>{label}</button>
+        ))}
       </div>
 
       {/* Body */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: 16 }} className="no-scrollbar">
-        {/* פרטי בסיס */}
-        <div style={{ background: '#fff', border: `1px solid ${BORDER}`, borderRadius: 12, padding: 14, marginBottom: 14 }}>
-          <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#333', marginBottom: 4 }}>
-            שם פרויקט <span style={{ color: RED }}>*</span>
-          </label>
-          <input style={{ ...inputStyle, marginBottom: 12 }} value={projectName}
-            onChange={e => setProjectName(e.target.value)} placeholder="לדוגמה: מחסן לוגיסטי חדרה" />
-          <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#333', marginBottom: 4 }}>תאריך</label>
-          <input type="date" style={{ ...inputStyle, marginBottom: 12 }} value={sheetDate}
-            onChange={e => setSheetDate(e.target.value)} />
-          <div style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-            background: '#FDECEC', border: `1px solid ${RED}`, borderRadius: 8, padding: '8px 12px',
-          }}>
-            <span style={{ fontSize: 11, color: GREY }}>סוג עבודה</span>
-            <span style={{ fontSize: 14, fontWeight: 800, color: RED }}>{WORK_TYPE}</span>
-          </div>
-        </div>
+      <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 12 }} className="no-scrollbar">
 
-        {/* קטגוריות חומרים */}
-        {visibleCats.map(cat => (
-          <CategoryCard
-            key={cat.key}
-            title={cat.label}
-            summary={categorySummary(cat.key, materials)}
-            open={openKeys.has(cat.key)}
-            onToggle={() => toggleOpen(cat.key)}
-            onDelete={() => deleteCategory(cat.key)}
-          >
-            {cat.key === 'roofing' && (
-              <RoofingCategory blocks={materials.roofing} onChange={v => patchMat({ roofing: v })} />
-            )}
-            {cat.key === 'wood' && (
-              <WoodCategory m={materials} patch={patchMat} />
-            )}
-            {cat.key === 'flashing' && (
-              <TypedRowsCategory rows={materials.flashing} onChange={v => patchMat({ flashing: v })}
-                typeOptions={FLASHING_TYPES} typePlaceholder="סוג פחחות" measurePlaceholder='מ"א'
-                totalLabel='סה"כ פחחות' unit='מ"א' />
-            )}
-            {cat.key === 'aluminum' && (
-              <AluminumCategory rows={materials.aluminum} onChange={v => patchMat({ aluminum: v })} />
-            )}
-            {cat.key === 'iron' && (
-              <TypedRowsCategory rows={materials.iron} onChange={v => patchMat({ iron: v })}
-                typeOptions={IRON_PROFILES} typePlaceholder="פרופיל" measurePlaceholder="אורך"
-                totalLabel='סה"כ ברזל' unit='מ"א' />
-            )}
-            {cat.key === 'insulation' && (
-              <TypedRowsCategory rows={materials.insulation} onChange={v => patchMat({ insulation: v })}
-                typeOptions={INSULATION_TYPES} typePlaceholder="סוג בידוד" measurePlaceholder='מ"ר'
-                totalLabel='סה"כ בידוד' unit='מ"ר' />
-            )}
-            {cat.key === 'misc' && (
-              <MiscCategory rows={materials.misc} onChange={v => patchMat({ misc: v })} />
-            )}
-          </CategoryCard>
-        ))}
+        {/* ══ לשונית פרטים ══ */}
+        {tab === 'details' && (
+          <>
+            <Card id="details" title="פרטים" {...noteProps}>
+              <div style={{ marginBottom: 8 }}><Field label="תאריך"><TextInput type="date" value={form.details.date} onChange={v => patchDetails({ date: v })} /></Field></div>
+              <div style={{ marginBottom: 8 }}><Field label="ממלא הדף"><SelectBox value={form.details.fillerName} onChange={v => patchDetails({ fillerName: v })} options={FILLERS} /></Field></div>
+              <div style={{ marginBottom: 8 }}><Field label="שם לקוח"><TextInput value={form.details.customerName} onChange={v => patchDetails({ customerName: v })} placeholder="שם הלקוח" /></Field></div>
+              <div style={{ marginBottom: 8 }}><Field label="כתובת"><TextInput value={form.details.address} onChange={v => patchDetails({ address: v })} placeholder="כתובת האתר" /></Field></div>
+              <div style={{ marginBottom: 8 }}>
+                <div style={labelStyle}>טלפון</div>
+                {form.details.phones.map((p, i) => (
+                  <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 6, alignItems: 'center' }}>
+                    <input dir="rtl" type="tel" inputMode="tel" style={inputStyle} value={p} placeholder="מספר טלפון"
+                      onChange={e => patchDetails({ phones: form.details.phones.map((x, j) => j === i ? e.target.value : x) })} />
+                    {i === form.details.phones.length - 1 ? (
+                      <button type="button" onClick={() => patchDetails({ phones: [...form.details.phones, ''] })} style={roundBtn(RED)}>＋</button>
+                    ) : (
+                      <button type="button" onClick={() => patchDetails({ phones: form.details.phones.filter((_, j) => j !== i) })} style={roundBtn(GREY)}>−</button>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <Field label="הכנה סולרי"><YesNoChip value={form.details.solarPrep} onChange={v => patchDetails({ solarPrep: v })} /></Field>
+            </Card>
 
-        {/* הוספת קטגוריה שנמחקה */}
-        {hiddenCats.length > 0 && (
-          <div style={{ display: 'flex', justifyContent: 'center', marginTop: 4 }}>
-            <div style={{ minWidth: 200 }}>
-              <Dropdown value="" placeholder="＋ הוסף קטגוריה" options={hiddenCats.map(c => c.label)}
-                onChange={label => {
-                  const cat = hiddenCats.find(c => c.label === label)
-                  if (cat) restoreCategory(cat.key)
-                }} />
+            <Card id="general" title="מאפיינים כלליים" {...noteProps}>
+              <div style={grid2}>
+                <Field label="גובה גג"><TextInput type="number" value={form.general.roofHeight} onChange={v => patchGeneral({ roofHeight: v })} placeholder="מ׳" /></Field>
+                <Field label="שטח (מ״ר)"><TextInput type="number" value={form.general.area} onChange={v => patchGeneral({ area: v })} placeholder="מ״ר" /></Field>
+              </div>
+              <div style={grid2}>
+                <Field label="סוג גג"><SelectBox value={form.general.roofType} onChange={v => patchGeneral({ roofType: v })} options={ROOF_TYPES} /></Field>
+                <Field label="קונסטרוקציה"><SelectBox value={form.general.construction} onChange={v => patchGeneral({ construction: v })} options={CONSTRUCTIONS} /></Field>
+              </div>
+              <ChipGroup options={GENERAL_CHIPS} value={form.general.chips} onChange={v => patchGeneral({ chips: v })} />
+            </Card>
+
+            <Card id="logistics" title="לוגיסטיקה" {...noteProps}>
+              <div style={grid2}>
+                <Field label="מנוף"><SelectBox value={form.logistics.crane} onChange={v => patchLogistics({ crane: v })} options={CRANE_OPTS} /></Field>
+                <Field label="מכולה"><SelectBox value={form.logistics.container} onChange={v => patchLogistics({ container: v })} options={CONTAINER_OPTS} /></Field>
+              </div>
+              <div style={grid2}>
+                <Field label="במת הרמה"><SelectBox value={form.logistics.lift} onChange={v => patchLogistics({ lift: v })} options={LIFT_OPTS} /></Field>
+                <Field label="זרוע/מספריים"><SelectBox value={form.logistics.arm} onChange={v => patchLogistics({ arm: v })} options={ARM_OPTS} /></Field>
+              </div>
+              <div style={grid2}>
+                <Field label="גישה לאתר"><SelectBox value={form.logistics.access} onChange={v => patchLogistics({ access: v })} options={ACCESS_OPTS} /></Field>
+                <Field label="גובה עבודה (מ׳)"><TextInput type="number" value={form.logistics.workHeight} onChange={v => patchLogistics({ workHeight: v })} placeholder="מ׳" /></Field>
+              </div>
+              <ChipGroup options={LOGISTICS_CHIPS} value={form.logistics.chips} onChange={v => patchLogistics({ chips: v })} />
+            </Card>
+
+            <Card title="סוג עבודה" tone="red">
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                {WORK_TYPES.map(wt => {
+                  const active = form.workTypes.includes(wt.key)
+                  return (
+                    <button key={wt.key} type="button" onClick={() => toggleWorkType(wt.key)} style={{
+                      border: active ? '1px solid #FFBBBB' : `1px solid ${BORDER}`,
+                      background: active ? '#FFF0F0' : '#fff', color: active ? '#CC0000' : '#444',
+                      borderRadius: 8, padding: '10px 8px', fontSize: 13, fontWeight: 700,
+                      cursor: 'pointer', direction: 'rtl', fontFamily: 'inherit', textAlign: 'center',
+                    }}>{wt.label}</button>
+                  )
+                })}
+              </div>
+            </Card>
+
+            {form.workTypes.map(key => (
+              <Card key={key} title={WORK_TYPE_LABEL[key]} tone="orange">
+                <WorkBlock typeKey={key} blocks={form.blocks} patch={patchBlocks} />
+              </Card>
+            ))}
+
+            <div style={{ margin: '10px 8px' }}>
+              <button type="button" onClick={() => alert('בקרוב')} style={{
+                width: '100%', background: 'transparent', border: `1.5px dashed ${GREY}`, color: '#666',
+                borderRadius: 10, padding: 12, fontSize: 14, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', direction: 'rtl',
+              }}>＋ הוסף מבנה נוסף</button>
             </div>
-          </div>
+          </>
         )}
 
-        <div style={{ height: 12 }} />
+        {/* ══ לשונית תיעוד ══ */}
+        {tab === 'docs' && (
+          <>
+            <DocSection icon="📷" title="תמונות שטח" subtitle="תיעוד ויזואלי של האתר" items={form.documentation.photos}
+              uploading={uploading} onAdd={f => uploadDocs('photos', f)} onRemove={i => removeDoc('photos', i)} onNote={(i, n, o) => setDocNote('photos', i, n, o)} />
+            <DocSection icon="✏️" title="סקיצה" subtitle="שרטוט / סקיצת גג" items={form.documentation.sketch}
+              uploading={uploading} onAdd={f => uploadDocs('sketch', f)} onRemove={i => removeDoc('sketch', i)} onNote={(i, n, o) => setDocNote('sketch', i, n, o)} />
+            <DocSection icon="📄" title="מסמכים" subtitle="הזמנות / אישורים / מסמכים" items={form.documentation.documents}
+              uploading={uploading} onAdd={f => uploadDocs('documents', f)} onRemove={i => removeDoc('documents', i)} onNote={(i, n, o) => setDocNote('documents', i, n, o)} />
+          </>
+        )}
+
+        {/* ══ לשונית חומרים ══ */}
+        {tab === 'materials' && (
+          <>
+            {form.materials.active.map(key => (
+              <MaterialCategoryCard key={key} catKey={key} cat={form.materials.data[key] ?? emptyCategory()}
+                onChange={c => setCategory(key, c)} onRemove={() => removeCategory(key)} />
+            ))}
+            {inactiveCats.length > 0 && (
+              <div style={{ margin: '6px 8px' }}>
+                <select dir="rtl" value="" onChange={e => { if (e.target.value) addCategory(e.target.value) }} style={{
+                  ...inputStyle, color: '#555', appearance: 'none', cursor: 'pointer',
+                  border: `1.5px dashed ${RED}`, height: 42, fontWeight: 700,
+                }}>
+                  <option value="" disabled hidden>＋ הוסף קטגוריה</option>
+                  {inactiveCats.map(k => <option key={k} value={k}>{CATEGORY_META[k].label}</option>)}
+                </select>
+              </div>
+            )}
+          </>
+        )}
       </div>
 
       {/* Flash */}
       {flash && (
         <div style={{
-          position: 'fixed', bottom: 90, left: '50%', transform: 'translateX(-50%)',
+          position: 'fixed', bottom: 88, left: '50%', transform: 'translateX(-50%)',
           background: '#111', color: '#fff', padding: '8px 18px', borderRadius: 20,
           fontSize: 13, fontWeight: 600, zIndex: 300, direction: 'rtl',
         }}>{flash}</div>
       )}
 
       {/* Footer */}
-      <div style={{
-        flexShrink: 0, background: '#fff', borderTop: `1px solid ${BORDER}`,
-        padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12,
-      }}>
+      <div style={{ flexShrink: 0, background: '#fff', borderTop: `1px solid ${BORDER}`, padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
         <button onClick={saveDraft} disabled={saving} style={{
-          flex: 1, background: '#fff', color: RED, border: `1.5px solid ${RED}`,
-          borderRadius: 10, padding: '13px', fontSize: 15, fontWeight: 700,
-          cursor: saving ? 'default' : 'pointer', fontFamily: 'inherit',
+          flex: 1, background: '#fff', color: RED, border: `1.5px solid ${RED}`, borderRadius: 10,
+          padding: 13, fontSize: 15, fontWeight: 700, cursor: saving ? 'default' : 'pointer', fontFamily: 'inherit',
         }}>שמור טיוטה</button>
         <button onClick={submit} disabled={saving} style={{
-          flex: 1, background: RED, color: '#fff', border: 'none',
-          borderRadius: 10, padding: '14px', fontSize: 15, fontWeight: 700,
-          cursor: saving ? 'default' : 'pointer', fontFamily: 'inherit',
+          flex: 1, background: RED, color: '#fff', border: 'none', borderRadius: 10,
+          padding: 14, fontSize: 15, fontWeight: 700, cursor: saving ? 'default' : 'pointer', fontFamily: 'inherit',
         }}>{saving ? 'שומר…' : '✓ אישור ושמירה'}</button>
       </div>
     </div>
   )
+}
+
+function roundBtn(color: string): React.CSSProperties {
+  return {
+    width: 34, height: 34, flexShrink: 0, borderRadius: '50%', border: `1px solid ${color}`,
+    background: color === GREY ? '#fff' : color, color: color === GREY ? GREY : '#fff',
+    cursor: 'pointer', fontSize: 18, lineHeight: 1, fontFamily: 'inherit',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+  }
 }

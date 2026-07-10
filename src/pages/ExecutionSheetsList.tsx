@@ -31,6 +31,11 @@ export default function ExecutionSheetsList() {
   useEffect(() => {
     loadSheets()
 
+    // Race condition: חוזרים לרשימה מיד אחרי navigate מדף שנשמר, והשורה
+    // החדשה עלולה לא להופיע עדיין (replication lag / commit שטרם נראה).
+    // טעינה חוזרת אחרי 500ms תופסת את הדף שזה עתה נשמר.
+    const raceTimer = setTimeout(() => loadSheets(), 500)
+
     // Realtime — refresh when a sheet is added/changed
     const channel = supabase
       .channel('execution-sheets-list')
@@ -43,7 +48,7 @@ export default function ExecutionSheetsList() {
       })
       .subscribe()
 
-    return () => { supabase.removeChannel(channel) }
+    return () => { clearTimeout(raceTimer); supabase.removeChannel(channel) }
   }, [])
 
   async function loadSheets() {
