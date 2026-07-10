@@ -25,6 +25,7 @@ export default function NewChat() {
   const [contacts, setContacts] = useState<DBUser[]>([])
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
+  const [opening, setOpening] = useState(false)
 
   useEffect(() => {
     loadContacts()
@@ -41,53 +42,22 @@ export default function NewChat() {
   }
 
   async function openDirectChat(contactId: string) {
-    if (!user) return
-    const myId = user.id
+    if (!user || opening) return  // ⛔ guard against double-tap creating duplicate groups
+    setOpening(true)
 
-    // Find existing direct group between the two users
-    const { data: myGroups } = await supabase
-      .from('group_members')
-      .select('group_id')
-      .eq('user_id', myId)
-      .is('left_at', null)
+    // Race-proof: the RPC holds a per-pair advisory lock, so even if two calls
+    // land at once we'll always get the same group_id back.
+    const { data: groupId, error } = await supabase.rpc('get_or_create_direct_chat', {
+      p_other_user_id: contactId,
+    })
 
-    const myGroupIds = myGroups?.map(m => m.group_id) ?? []
-
-    if (myGroupIds.length > 0) {
-      const { data: shared } = await supabase
-        .from('group_members')
-        .select('group_id, groups:group_id(type)')
-        .eq('user_id', contactId)
-        .in('group_id', myGroupIds)
-        .is('left_at', null)
-
-      const directGroup = shared?.find((row: any) => row.groups?.type === 'direct')
-      if (directGroup) {
-        navigate(`/chat/${directGroup.group_id}`)
-        return
-      }
+    if (error || !groupId) {
+      console.error('openDirectChat failed:', error)
+      setOpening(false)
+      return
     }
 
-    // Create new direct group
-    const contactData = contacts.find(c => c.id === contactId)
-    const { data: newGroup } = await supabase
-      .from('groups')
-      .insert({
-        name: contactData?.full_name ?? 'שיחה ישירה',
-        type: 'direct',
-        created_by: myId,
-      })
-      .select('id')
-      .single()
-
-    if (!newGroup) return
-
-    await supabase.from('group_members').insert([
-      { group_id: newGroup.id, user_id: myId },
-      { group_id: newGroup.id, user_id: contactId },
-    ])
-
-    navigate(`/chat/${newGroup.id}`)
+    navigate(`/chat/${groupId}`)
   }
 
   const filtered = contacts.filter(c =>

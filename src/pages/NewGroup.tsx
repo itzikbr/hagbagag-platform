@@ -30,7 +30,7 @@ export default function NewGroup() {
   const selectedUsers = users.filter(u => selected.includes(u.id))
 
   const handleCreate = async () => {
-    if (!user || !profile || !groupName.trim()) return
+    if (!user || !profile || !groupName.trim() || saving) return  // ⛔ guard double-tap
     setSaving(true)
     try {
       const { data: newGroup, error: groupErr } = await supabase.from('groups')

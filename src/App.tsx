@@ -7,9 +7,11 @@ import ChatList from './pages/ChatList'
 import ChatConversation from './pages/ChatConversation'
 import NewChat from './pages/NewChat'
 import NewGroup from './pages/NewGroup'
-import SheetsPlaceholder from './pages/SheetsPlaceholder'
+import ExecutionSheetsList from './pages/ExecutionSheetsList'
+import NewExecutionSheet from './pages/NewExecutionSheet'
 import Contacts from './pages/Contacts'
 import Admin from './pages/Admin'
+import ItzikDashboard from './pages/ItzikDashboard'
 import BottomNav from './components/BottomNav'
 
 function Splash() {
@@ -31,6 +33,13 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
   return <>{children}</>
 }
 
+function RequireManagerOrAdmin({ children }: { children: React.ReactNode }) {
+  const { profile, initialized } = useAuth()
+  if (!initialized || !profile) return <Splash />
+  if (profile.role !== 'manager' && profile.role !== 'admin') return <Navigate to="/chats" replace />
+  return <>{children}</>
+}
+
 function PlatformLayout() {
   const [activeTab, setActiveTab] = useState<'chats' | 'sheets' | 'more'>('chats')
   const location = useLocation()
@@ -38,6 +47,7 @@ function PlatformLayout() {
                   location.pathname === '/new-chat' ||
                   location.pathname === '/new-group' ||
                   location.pathname === '/contacts' ||
+                  location.pathname.startsWith('/sheets/') ||
                   location.pathname === '/admin'
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
@@ -48,9 +58,12 @@ function PlatformLayout() {
           <Route path="/chat/:id"  element={<ChatConversation />} />
           <Route path="/new-chat"  element={<NewChat />} />
           <Route path="/new-group" element={<NewGroup />} />
-          <Route path="/sheets"    element={<SheetsPlaceholder />} />
+          <Route path="/sheets"     element={<ExecutionSheetsList />} />
+          <Route path="/sheets/new" element={<NewExecutionSheet />} />
+          <Route path="/sheets/:id" element={<NewExecutionSheet />} />
           <Route path="/contacts"  element={<Contacts />} />
-          <Route path="/admin"     element={<Admin />} />
+          <Route path="/admin"     element={<RequireManagerOrAdmin><Admin /></RequireManagerOrAdmin>} />
+          <Route path="/itzik"     element={<RequireManagerOrAdmin><ItzikDashboard /></RequireManagerOrAdmin>} />
           <Route path="*"          element={<Navigate to="/chats" replace />} />
         </Routes>
       </div>

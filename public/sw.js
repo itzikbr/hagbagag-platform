@@ -3,7 +3,7 @@
 // אחראי על: Push Notifications + Cache (offline basic)
 // ============================================================
 
-const CACHE_NAME = 'hagbagag-v1'
+const CACHE_NAME = 'hagbagag-v2'
 const OFFLINE_FALLBACK = '/offline.html'
 
 // קבצים לשמירה בקאש ראשוני
@@ -21,13 +21,19 @@ self.addEventListener('install', event => {
 })
 
 // ── Activate ──
+// מנקה קאש ישן, תופס שליטה, ומכריח חלונות פתוחים לטעון מחדש את קליפת האפליקציה
+// כדי שמכשירים שנתקעו על גרסה מקומית ישנה (בעיקר PWA ב-iOS) יקבלו את הבנדל החדש.
+// רץ פעם אחת בלבד לכל גרסת SW, לכן אין לולאת רענון.
 self.addEventListener('activate', event => {
-  event.waitUntil(
-    caches.keys().then(keys =>
-      Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
-    )
-  )
-  self.clients.claim()
+  event.waitUntil((async () => {
+    const keys = await caches.keys()
+    await Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
+    await self.clients.claim()
+    const windows = await self.clients.matchAll({ type: 'window' })
+    for (const client of windows) {
+      client.navigate(client.url)
+    }
+  })())
 })
 
 // ── Fetch — Network First, Cache Fallback ──

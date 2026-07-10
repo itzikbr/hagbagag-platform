@@ -3,7 +3,7 @@
 // UserRole מתאים לטבלת users ב-Supabase
 // ============================================================
 
-export type UserRole = 'manager' | 'office' | 'field_worker' | 'external'
+export type UserRole = 'admin' | 'manager' | 'office' | 'field_worker' | 'external'
 
 export interface Contact {
   id: string
@@ -66,6 +66,7 @@ export interface DBMessage {
 
 export interface DBUser {
   id: string
+  username: string
   full_name: string
   role: UserRole
   avatar_url: string | null

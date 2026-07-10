@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { DBMessage } from '../types'
 import Avatar from '../components/Avatar'
+import GroupManagementPanel from '../components/GroupManagementPanel'
 
 interface GroupInfo {
   id: string
@@ -22,6 +23,8 @@ export default function ChatConversation() {
   const [text, setText] = useState('')
   const [loading, setLoading] = useState(true)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const [showPanel, setShowPanel] = useState(false)
+  const [toast, setToast] = useState<string | null>(null)
 
   // Scroll to bottom when messages change
   useEffect(() => {
@@ -183,13 +186,18 @@ export default function ChatConversation() {
           </div>
         </div>
 
-        <button style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-            <circle cx="5" cy="12" r="2" fill="rgba(255,255,255,0.8)"/>
-            <circle cx="12" cy="12" r="2" fill="rgba(255,255,255,0.8)"/>
-            <circle cx="19" cy="12" r="2" fill="rgba(255,255,255,0.8)"/>
-          </svg>
-        </button>
+        {groupInfo.type === 'group' && (
+          <button
+            onClick={() => setShowPanel(true)}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}
+          >
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+              <circle cx="5" cy="12" r="2" fill="rgba(255,255,255,0.8)"/>
+              <circle cx="12" cy="12" r="2" fill="rgba(255,255,255,0.8)"/>
+              <circle cx="19" cy="12" r="2" fill="rgba(255,255,255,0.8)"/>
+            </svg>
+          </button>
+        )}
       </div>
 
       {/* Messages */}
@@ -301,7 +309,11 @@ export default function ChatConversation() {
         </div>
 
         <button
-          onClick={text.trim() ? handleSend : undefined}
+          onClick={() => {
+            if (text.trim()) { handleSend(); return }
+            setToast('בקרוב')
+            setTimeout(() => setToast(null), 1800)
+          }}
           style={{
             width: 44, height: 44, borderRadius: '50%',
             background: '#CC0000', border: 'none', cursor: 'pointer',
@@ -321,6 +333,26 @@ export default function ChatConversation() {
           )}
         </button>
       </div>
+
+      {showPanel && (
+        <GroupManagementPanel
+          group={groupInfo}
+          onClose={() => setShowPanel(false)}
+          onGroupRenamed={(newName) => setGroupInfo(g => g ? { ...g, name: newName } : g)}
+          onGroupDeleted={() => { setShowPanel(false); navigate('/chat') }}
+          onMembersChanged={(count) => setGroupInfo(g => g ? { ...g, memberCount: count } : g)}
+        />
+      )}
+
+      {toast && (
+        <div style={{
+          position: 'fixed', bottom: 90, left: '50%', transform: 'translateX(-50%)',
+          background: 'rgba(0,0,0,0.8)', color: '#fff', padding: '8px 18px',
+          borderRadius: 20, fontSize: 14, zIndex: 1000,
+        }}>
+          {toast}
+        </div>
+      )}
     </div>
   )
 }

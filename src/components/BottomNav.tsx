@@ -1,16 +1,22 @@
 import { useNavigate, useLocation } from 'react-router-dom'
+import { useAuth } from '../hooks/useAuth'
 
 interface BottomNavProps {
-  activeTab: 'chats' | 'sheets' | 'more'
-  onTabChange: (tab: 'chats' | 'sheets' | 'more') => void
+  activeTab: 'chats' | 'sheets' | 'more' | 'itzik'
+  onTabChange: (tab: 'chats' | 'sheets' | 'more' | 'itzik') => void
 }
 
 export default function BottomNav({ activeTab, onTabChange }: BottomNavProps) {
   const navigate = useNavigate()
   const location = useLocation()
+  const { profile } = useAuth()
 
   const isChats = location.pathname.startsWith('/chat') || location.pathname === '/chats'
   const isSheets = location.pathname === '/sheets'
+  const isItzik = location.pathname === '/itzik'
+
+  // הטאב האישי מוצג רק למנהלים / אדמין
+  const showItzik = profile?.role === 'admin' || profile?.role === 'manager'
 
   const tabs = [
     {
@@ -49,6 +55,14 @@ export default function BottomNav({ activeTab, onTabChange }: BottomNavProps) {
       ),
       path: '/chats',
     },
+    ...(showItzik ? [{
+      id: 'itzik' as const,
+      label: '⚡',
+      icon: (active: boolean) => (
+        <span style={{ fontSize: 22, lineHeight: 1, opacity: active ? 1 : 0.55 }}>⚡</span>
+      ),
+      path: '/itzik',
+    }] : []),
   ]
 
   return (
@@ -60,7 +74,10 @@ export default function BottomNav({ activeTab, onTabChange }: BottomNavProps) {
       flexShrink: 0,
     }}>
       {tabs.map(tab => {
-        const isActive = tab.id === 'chats' ? isChats : tab.id === 'sheets' ? isSheets : activeTab === 'more'
+        const isActive = tab.id === 'chats' ? isChats
+          : tab.id === 'sheets' ? isSheets
+          : tab.id === 'itzik' ? isItzik
+          : activeTab === 'more'
         return (
           <button
             key={tab.id}

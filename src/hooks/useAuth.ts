@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { supabase } from '../lib/supabase'
 import type { User } from '@supabase/supabase-js'
 
-export type UserRole = 'manager' | 'office' | 'field_worker' | 'external'
+export type UserRole = 'admin' | 'manager' | 'office' | 'field_worker' | 'external'
 
 export interface UserProfile {
   id:         string
@@ -64,8 +64,16 @@ export const useAuth = create<AuthState>((set, get) => ({
   // ──────────────────────────────────────────────
   logout: async () => {
     set({ loading: true })
-    await supabase.auth.signOut()
-    set({ user: null, profile: null, loading: false })
+    try {
+      // scope 'local' מנקה את הסשן במכשיר בלי קריאת רשת שעלולה להיכשל
+      // (טוקן שפג / אופליין) ולחסום את ההתנתקות
+      await supabase.auth.signOut({ scope: 'local' })
+    } catch (e) {
+      console.warn('signOut נכשל — מנקים סשן מקומי בכל מקרה:', e)
+    } finally {
+      // תמיד מנקים את המצב המקומי כדי שההתנתקות תצליח בכל תרחיש
+      set({ user: null, profile: null, loading: false })
+    }
   },
 
   // ──────────────────────────────────────────────

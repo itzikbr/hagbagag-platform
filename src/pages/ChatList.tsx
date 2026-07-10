@@ -21,6 +21,7 @@ export default function ChatList() {
   const [search, setSearch] = useState('')
   const navigate = useNavigate()
   const userId = useAuth(s => s.user?.id)
+  const logout = useAuth(s => s.logout)
   const profile = useAuth(s => s.profile)
 
   useEffect(() => {
@@ -127,10 +128,36 @@ export default function ChatList() {
         justifyContent: 'space-between',
         flexShrink: 0,
       }}>
-        <button onClick={async () => { await logout(); navigate('/login', { replace: true }) }} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" stroke="rgba(255,255,255,0.7)" strokeWidth="2" strokeLinecap="round"/><polyline points="16 17 21 12 16 7" stroke="rgba(255,255,255,0.7)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/><line x1="21" y1="12" x2="9" y2="12" stroke="rgba(255,255,255,0.7)" strokeWidth="2" strokeLinecap="round"/></svg>
-        </button>
-        <span style={{ color: '#fff', fontSize: 20, fontWeight: 700 }}>חג בגג</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <button
+            onClick={async () => { await logout(); navigate('/login', { replace: true }) }}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}
+            title="יציאה"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" stroke="rgba(255,255,255,0.7)" strokeWidth="2" strokeLinecap="round"/><polyline points="16 17 21 12 16 7" stroke="rgba(255,255,255,0.7)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/><line x1="21" y1="12" x2="9" y2="12" stroke="rgba(255,255,255,0.7)" strokeWidth="2" strokeLinecap="round"/></svg>
+          </button>
+          {profile?.full_name && (
+            <div
+              title={profile.full_name}
+              style={{
+                width: 34, height: 34, borderRadius: '50%',
+                border: '2px solid rgba(255,255,255,0.85)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                flexShrink: 0,
+              }}
+            >
+              <Avatar name={profile.full_name} size={30} />
+            </div>
+          )}
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', lineHeight: 1.15 }}>
+          <span style={{ color: '#fff', fontSize: 20, fontWeight: 700 }}>חג בגג</span>
+          {profile?.full_name && (
+            <span style={{ color: 'rgba(255,255,255,0.85)', fontSize: 12, fontWeight: 400 }}>
+              {profile.full_name}
+            </span>
+          )}
+        </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button
             onClick={() => navigate('/new-chat')}
@@ -217,7 +244,7 @@ export default function ChatList() {
       <button
         onClick={() => navigate('/new-chat')}
         style={{
-          position: 'absolute', bottom: 72, left: 16,
+          position: 'fixed', bottom: 72, left: 16,
           width: 56, height: 56, borderRadius: '50%',
           background: '#CC0000', border: 'none', cursor: 'pointer',
           display: 'flex', alignItems: 'center', justifyContent: 'center',

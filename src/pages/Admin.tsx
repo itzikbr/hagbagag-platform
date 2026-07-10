@@ -6,6 +6,7 @@ import { DBUser } from '../types'
 import Avatar from '../components/Avatar'
 
 const ROLE_LABELS: Record<string, string> = {
+  admin: 'אדמין',
   manager: 'מנהל',
   office: 'משרד',
   field_worker: 'שטח',
@@ -14,6 +15,7 @@ const ROLE_LABELS: Record<string, string> = {
 }
 
 const ROLE_OPTIONS = [
+  { value: 'admin', label: 'אדמין' },
   { value: 'manager', label: 'מנהל' },
   { value: 'office', label: 'משרד' },
   { value: 'field_worker', label: 'שטח' },
@@ -31,17 +33,18 @@ export default function Admin() {
   const [newUser, setNewUser] = useState({ full_name: '', role: 'field_worker', username: '', password: '' })
   const [addMsg, setAddMsg] = useState('')
   const [editingName, setEditingName] = useState<{ id: string; value: string } | null>(null)
+  const [editingUsername, setEditingUsername] = useState<{ id: string; value: string } | null>(null)
   const [changingPassword, setChangingPassword] = useState<{ id: string; value: string } | null>(null)
 
   useEffect(() => {
-    if (profile?.role === 'manager') loadUsers()
+    if (profile?.role === 'manager' || profile?.role === 'admin') loadUsers()
   }, [profile])
 
   async function loadUsers() {
     setLoading(true)
     const { data } = await supabase
       .from('users')
-      .select('id, full_name, role, avatar_url, is_active')
+      .select('id, username, full_name, role, avatar_url, is_active')
       .order('full_name')
     setUsers((data ?? []) as DBUser[])
     setLoading(false)
@@ -86,8 +89,42 @@ export default function Admin() {
     setSaving(null)
   }
 
+  async function updateUsername(userId: string, newUsername: string) {
+    const clean = newUsername.trim().toLowerCase()
+    if (!/^[a-z0-9_]{2,32}$/.test(clean)) {
+      alert('שם משתמש: 2-32 תווים, אנגלית קטנה, ספרות, קו תחתון')
+      return
+    }
+    setSaving(userId)
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const res = await fetch('https://edsivltyzrfjrjhwfbid.supabase.co/functions/v1/create-user', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session?.access_token}`,
+        },
+        body: JSON.stringify({ user_id: userId, username: clean })
+      })
+      const result = await res.json()
+      if (result.success) {
+        setUsers(prev => prev.map(u => u.id === userId ? { ...u, username: clean } : u))
+        setEditingUsername(null)
+      } else {
+        alert('שגיאה: ' + (result.error || 'לא ידוע'))
+      }
+    } catch (err) {
+      alert('שגיאת תקשורת: ' + String(err))
+    } finally {
+      setSaving(null)
+    }
+  }
+
   async function changePassword(userId: string, newPassword: string) {
-    if (!newPassword || newPassword.length < 4) return
+    if (!newPassword || newPassword.length < 6) {
+      alert('סיסמה חייבת להיות לפחות 6 תווים')
+      return
+    }
     setSaving(userId)
     try {
       const { data: { session } } = await supabase.auth.getSession()
@@ -106,14 +143,15 @@ export default function Admin() {
         alert('שגיאה: ' + (result.error || 'לא ידוע'))
         setChangingPassword(null)
       }
-    } catch {
+    } catch (err) {
+      alert('שגיאת תקשורת: ' + String(err))
       setChangingPassword(null)
     } finally {
       setSaving(null)
     }
   }
 
-  if (profile?.role !== 'manager') {
+  if (profile?.role !== 'manager' && profile?.role !== 'admin') {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 12 }}>
         <span style={{ fontSize: 48 }}>🔒</span>
@@ -126,7 +164,6 @@ export default function Admin() {
   }
 
   const active = users.filter(u => u.is_active)
-  const inactive = users.filter(u => !u.is_active)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', direction: 'rtl' }}>
@@ -194,8 +231,8 @@ export default function Admin() {
                   setAddMsg('שם מלא ושם משתמש חובה')
                   return
                 }
-                if (!newUser.password || newUser.password.length < 4) {
-                  setAddMsg('סיסמה חייבת להיות לפחות 4 תווים')
+                if (!newUser.password || newUser.password.length < 6) {
+                  setAddMsg('סיסמה חייבת להיות לפחות 6 תווים')
                   return
                 }
                 setAddMsg('יוצר משתמש...')
@@ -209,6 +246,7 @@ export default function Admin() {
                     },
                     body: JSON.stringify({
                       email: `${newUser.username}@hagbagag.local`,
+                      username: newUser.username,
                       password: newUser.password,
                       full_name: newUser.full_name,
                       role: newUser.role,
@@ -250,6 +288,7 @@ export default function Admin() {
                 editing={editingId === u.id}
                 saving={saving === u.id}
                 editingName={editingName?.id === u.id ? editingName.value : null}
+                editingUsername={editingUsername?.id === u.id ? editingUsername.value : null}
                 changingPassword={changingPassword?.id === u.id ? changingPassword.value : null}
                 onEdit={() => setEditingId(editingId === u.id ? null : u.id)}
                 onRoleChange={(role) => updateRole(u.id, role)}
@@ -257,34 +296,9 @@ export default function Admin() {
                 onStartEditName={() => setEditingName({ id: u.id, value: u.full_name })}
                 onNameChange={(v) => setEditingName({ id: u.id, value: v })}
                 onSaveName={() => updateName(u.id, editingName?.value ?? '')}
-                onStartChangePassword={() => setChangingPassword({ id: u.id, value: '' })}
-                onPasswordChange={(v) => setChangingPassword({ id: u.id, value: v })}
-                onSavePassword={() => changePassword(u.id, changingPassword?.value ?? '')}
-              />
-            ))}
-          </div>
-        )}
-
-        {/* Inactive Users */}
-        {!loading && inactive.length > 0 && (
-          <div style={{ marginTop: 8 }}>
-            <div style={{ padding: '10px 16px 4px', fontSize: 12, color: '#8696A0', fontWeight: 600, letterSpacing: 0.5 }}>
-              מושהים — {inactive.length}
-            </div>
-            {inactive.map(u => (
-              <UserCard
-                key={u.id}
-                user={u}
-                editing={editingId === u.id}
-                saving={saving === u.id}
-                editingName={editingName?.id === u.id ? editingName.value : null}
-                changingPassword={changingPassword?.id === u.id ? changingPassword.value : null}
-                onEdit={() => setEditingId(editingId === u.id ? null : u.id)}
-                onRoleChange={(role) => updateRole(u.id, role)}
-                onToggleActive={() => toggleActive(u.id, u.is_active)}
-                onStartEditName={() => setEditingName({ id: u.id, value: u.full_name })}
-                onNameChange={(v) => setEditingName({ id: u.id, value: v })}
-                onSaveName={() => updateName(u.id, editingName?.value ?? '')}
+                onStartEditUsername={() => setEditingUsername({ id: u.id, value: u.username })}
+                onUsernameChange={(v) => setEditingUsername({ id: u.id, value: v.toLowerCase().replace(/[^a-z0-9_]/g, '') })}
+                onSaveUsername={() => updateUsername(u.id, editingUsername?.value ?? '')}
                 onStartChangePassword={() => setChangingPassword({ id: u.id, value: '' })}
                 onPasswordChange={(v) => setChangingPassword({ id: u.id, value: v })}
                 onSavePassword={() => changePassword(u.id, changingPassword?.value ?? '')}
@@ -299,11 +313,12 @@ export default function Admin() {
   )
 }
 
-function UserCard({ user, editing, saving, editingName, changingPassword, onEdit, onRoleChange, onToggleActive, onStartEditName, onNameChange, onSaveName, onStartChangePassword, onPasswordChange, onSavePassword }: {
+function UserCard({ user, editing, saving, editingName, editingUsername, changingPassword, onEdit, onRoleChange, onToggleActive, onStartEditName, onNameChange, onSaveName, onStartEditUsername, onUsernameChange, onSaveUsername, onStartChangePassword, onPasswordChange, onSavePassword }: {
   user: DBUser
   editing: boolean
   saving: boolean
   editingName: string | null
+  editingUsername: string | null
   changingPassword: string | null
   onEdit: () => void
   onRoleChange: (role: string) => void
@@ -311,6 +326,9 @@ function UserCard({ user, editing, saving, editingName, changingPassword, onEdit
   onStartEditName: () => void
   onNameChange: (v: string) => void
   onSaveName: () => void
+  onStartEditUsername: () => void
+  onUsernameChange: (v: string) => void
+  onSaveUsername: () => void
   onStartChangePassword: () => void
   onPasswordChange: (v: string) => void
   onSavePassword: () => void
@@ -334,8 +352,11 @@ function UserCard({ user, editing, saving, editingName, changingPassword, onEdit
               {!user.is_active && <span style={{ fontSize: 11, color: '#bbb', marginRight: 6 }}>מושהה</span>}
             </div>
           )}
-          <div style={{ fontSize: 13, color: '#8696A0', marginTop: 2 }}>
-            {ROLE_LABELS[user.role] || user.role}
+          <div style={{ fontSize: 13, color: '#8696A0', marginTop: 2, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <span>{ROLE_LABELS[user.role] || user.role}</span>
+            <span style={{ direction: 'ltr', fontFamily: 'monospace', fontSize: 12, color: '#A0AEB7' }}>
+              @{user.username}
+            </span>
           </div>
         </div>
         <div style={{ display: 'flex', gap: 6, flexDirection: 'column', alignItems: 'flex-end' }}>
@@ -349,12 +370,42 @@ function UserCard({ user, editing, saving, editingName, changingPassword, onEdit
               {saving ? '...' : user.is_active ? 'השהה' : 'הפעל'}
             </button>
           </div>
-          <button onClick={onStartChangePassword} disabled={saving}
-            style={{ background: '#F0F2F5', border: 'none', borderRadius: 8, padding: '5px 10px', cursor: 'pointer', fontSize: 12, color: '#555' }}>
-            סיסמה
-          </button>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button onClick={onStartEditUsername} disabled={saving}
+              style={{ background: editingUsername !== null ? '#FFF0F0' : '#F0F2F5', border: 'none', borderRadius: 8, padding: '5px 10px', cursor: 'pointer', fontSize: 12, color: editingUsername !== null ? '#CC0000' : '#555' }}>
+              שם
+            </button>
+            <button onClick={onStartChangePassword} disabled={saving}
+              style={{ background: changingPassword !== null ? '#FFF0F0' : '#F0F2F5', border: 'none', borderRadius: 8, padding: '5px 10px', cursor: 'pointer', fontSize: 12, color: changingPassword !== null ? '#CC0000' : '#555' }}>
+              סיסמה
+            </button>
+          </div>
         </div>
       </div>
+
+      {/* Username change */}
+      {editingUsername !== null && (
+        <div style={{ marginTop: 8, paddingRight: 58 }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <span style={{ color: '#A0AEB7', direction: 'ltr', fontFamily: 'monospace', fontSize: 16 }}>@</span>
+            <input
+              type="text"
+              placeholder="שם משתמש חדש"
+              value={editingUsername}
+              onChange={e => onUsernameChange(e.target.value)}
+              autoFocus
+              style={{ border: '1px solid #CC0000', borderRadius: 6, padding: '6px 10px', fontSize: 14, flex: 1, direction: 'ltr', fontFamily: 'monospace' }}
+            />
+            <button onClick={onSaveUsername} disabled={saving}
+              style={{ background: '#CC0000', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontSize: 13 }}>
+              {saving ? '...' : 'עדכן'}
+            </button>
+          </div>
+          <div style={{ fontSize: 11, color: '#8696A0', marginTop: 4 }}>
+            אנגלית קטנה, ספרות וקו תחתון בלבד · 2-32 תווים
+          </div>
+        </div>
+      )}
 
       {/* Password change */}
       {changingPassword !== null && (
