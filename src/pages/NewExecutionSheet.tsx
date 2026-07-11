@@ -24,9 +24,16 @@ const ARM_OPTS = ['לא נדרש', 'מספריים', 'זרוע']
 const ACCESS_OPTS = ['קלה', 'מוגבלת', 'קשה', 'ללא גישה']
 const LOGISTICS_CHIPS = ['פנויה', 'עצים', 'חשמל', 'דרך צרה', 'אחר']
 const CEILING_OPTS = ['יש', 'בטון', 'רביץ', 'צפה', 'אחר', 'אין']
-const PANEL_OPTS = ['איסכורית', 'פנל מבודד', 'אחר']
 const ALUM_SHADES = ['חום', 'פולי סנדר', 'מהגוני', 'לבן', 'קרם', 'אפור', 'ירוק', 'אחר']
 const GUTTER_TYPES = ['חיצוני', 'פנימי', 'חיצוני ופנימי', 'אחר']
+const USED_FOR_OPTS = ['מגורים', 'סככה פתוחה', 'סככה סגורה', 'מחסן', 'מבנה ציבורי', 'תעשייה', 'אחר']
+const GRANDPA_OPTS = ['אין', 'יש']
+const ROOF_HEIGHT_OPTS = ['נמוך עד 3מ׳', 'בינוני 3-6מ׳', 'גבוה 6מ׳+']
+const EXISTING_ROOF_OPTS = ['איסכורית', 'אסבסט', 'רעפים', 'פנלים', 'שינגלס', 'אחר']
+const NEW_ROOF_OPTS = ['איסכורית', 'פנל מבודד', 'רעפים', 'שינגלס', 'אחר']
+const SHEET_THICKNESS_OPTS = ['0.4mm', '0.5mm', '0.6mm', '0.7mm']
+const INSULATION_TYPE_OPTS = ['רדיד אלומיניום', 'צמר סלעים', 'צמר זכוכית', 'אחר']
+const INSULATION_THICKNESS_OPTS = ['5 סמ', '8 סמ', '10 סמ', '12 סמ', 'אחר']
 
 // ── לשונית התקדמות ─────────────────────────────────────────────
 const PERMIT_SUPERVISORS = ['עמאד', 'סמיר', 'עלי', 'אסף', 'איציק']
@@ -88,12 +95,12 @@ interface Logistics {
 interface AsbestosBlock {
   coordX: string; coordY: string; usedFor: string
   ceiling: string; ceilingConstruction: string
-  grandpaStick: string; empty: string; sensitive: string
+  grandpaStick: string; sensitive: string
 }
 interface RoofReplaceBlock {
   existingRoof: string; newRoof: string
   construction: string; slope: string; overhang: string
-  panelType: string; thickness1: string; thickness2: string
+  thickness1: string; thickness2: string
 }
 interface AluminumBlock { shade: string; meters: string; coating: string[] }
 interface GuttersBlock {
@@ -144,8 +151,8 @@ interface SheetForm {
 function todayISO(): string { return new Date().toISOString().slice(0, 10) }
 function emptyBlocks(): WorkBlocks {
   return {
-    asbestos:    { coordX: '', coordY: '', usedFor: '', ceiling: '', ceilingConstruction: '', grandpaStick: '', empty: '', sensitive: '' },
-    roofReplace: { existingRoof: '', newRoof: '', construction: '', slope: '', overhang: '', panelType: '', thickness1: '', thickness2: '' },
+    asbestos:    { coordX: '', coordY: '', usedFor: '', ceiling: '', ceilingConstruction: '', grandpaStick: '', sensitive: '' },
+    roofReplace: { existingRoof: '', newRoof: '', construction: '', slope: '', overhang: '', thickness1: '', thickness2: '' },
     aluminum:    { shade: '', meters: '', coating: [] },
     gutters:     { type: '', guttersM: '', guttersSegments: '', downUnits: '', downSegments: '' },
     insulation:  { type: '', area: '', thickness: '' },
@@ -298,9 +305,9 @@ function Card({ id, title, tone = 'default', notes, setNotes, notesOpen, toggleN
       </div>
       <div style={{ padding: 12 }}>
         {open && (
-          <textarea dir="rtl" autoFocus placeholder="הערה…" value={notes![id!] ?? ''}
+          <textarea dir="rtl" autoFocus rows={2} placeholder="הערה…" value={notes![id!] ?? ''}
             onChange={e => setNotes!(id!, e.target.value)}
-            style={{ ...inputStyle, height: 'auto', minHeight: 40, padding: 8, resize: 'vertical', marginBottom: 10, lineHeight: 1.4 }} />
+            style={{ ...inputStyle, height: 'auto', minHeight: 52, padding: 8, resize: 'vertical', marginBottom: 10, lineHeight: 1.4 }} />
         )}
         {children}
       </div>
@@ -322,15 +329,14 @@ function WorkBlock({ typeKey, blocks, patch }: {
           <Field label="נ.צ. Y"><TextInput value={b.coordY} onChange={v => set({ coordY: v })} placeholder="Y" /></Field>
         </div>
         <div style={{ marginBottom: 8 }}>
-          <Field label="למה משמש"><TextInput value={b.usedFor} onChange={v => set({ usedFor: v })} placeholder="שימוש המבנה" /></Field>
+          <Field label="למה משמש"><SelectBox value={b.usedFor} onChange={v => set({ usedFor: v })} options={USED_FOR_OPTS} /></Field>
         </div>
         <div style={grid2}>
-          <Field label="תקרה"><SelectBox value={b.ceiling} onChange={v => set({ ceiling: v })} options={CEILING_OPTS} /></Field>
-          <Field label="קונסטרוקציה"><TextInput value={b.ceilingConstruction} onChange={v => set({ ceilingConstruction: v })} placeholder="קונסטרוקציה" /></Field>
+          <Field label="תקרה קשיחה"><SelectBox value={b.ceiling} onChange={v => set({ ceiling: v })} options={CEILING_OPTS} /></Field>
+          <Field label="קונסטרוקציה"><SelectBox value={b.ceilingConstruction} onChange={v => set({ ceilingConstruction: v })} options={CONSTRUCTIONS} /></Field>
         </div>
-        <div style={grid2}>
-          <Field label="מקל סבא"><TextInput value={b.grandpaStick} onChange={v => set({ grandpaStick: v })} placeholder="מקל סבא" /></Field>
-          <Field label="ריק"><TextInput value={b.empty} onChange={v => set({ empty: v })} placeholder="ריק" /></Field>
+        <div style={{ marginBottom: 8 }}>
+          <Field label="מקל סבא"><SelectBox value={b.grandpaStick} onChange={v => set({ grandpaStick: v })} options={GRANDPA_OPTS} /></Field>
         </div>
         <Field label="מבנים רגישים"><TextArea value={b.sensitive} onChange={v => set({ sensitive: v })} placeholder="מבנים רגישים בסביבה" /></Field>
       </>
@@ -342,23 +348,24 @@ function WorkBlock({ typeKey, blocks, patch }: {
     return (
       <>
         <div style={grid2}>
-          <Field label="גג קיים"><TextInput value={b.existingRoof} onChange={v => set({ existingRoof: v })} placeholder="גג קיים" /></Field>
-          <Field label="גג חדש"><TextInput value={b.newRoof} onChange={v => set({ newRoof: v })} placeholder="גג חדש" /></Field>
+          <Field label="גג קיים"><SelectBox value={b.existingRoof} onChange={v => set({ existingRoof: v })} options={EXISTING_ROOF_OPTS} /></Field>
+          <Field label="גג חדש"><SelectBox value={b.newRoof} onChange={v => set({ newRoof: v })} options={NEW_ROOF_OPTS} /></Field>
         </div>
         <div style={grid2}>
-          <Field label="קונסטרוקציה"><TextInput value={b.construction} onChange={v => set({ construction: v })} placeholder="קונסטרוקציה" /></Field>
+          <Field label="קונסטרוקציה"><SelectBox value={b.construction} onChange={v => set({ construction: v })} options={CONSTRUCTIONS} /></Field>
           <Field label="שיפוע"><TextInput value={b.slope} onChange={v => set({ slope: v })} placeholder="שיפוע" /></Field>
         </div>
         <div style={{ marginBottom: 8 }}>
           <Field label="בליטה מהפטות"><TextInput value={b.overhang} onChange={v => set({ overhang: v })} placeholder="בליטה מהפטות" /></Field>
         </div>
-        <div style={grid2}>
-          <Field label="סוג פח"><SelectBox value={b.panelType} onChange={v => set({ panelType: v })} options={PANEL_OPTS} /></Field>
-          {b.panelType === 'איסכורית' && <Field label="עובי פח"><TextInput value={b.thickness1} onChange={v => set({ thickness1: v })} placeholder="עובי" /></Field>}
-          {b.panelType === 'פנל מבודד' && <Field label="עובי חיצוני"><TextInput value={b.thickness1} onChange={v => set({ thickness1: v })} placeholder="עובי חיצוני" /></Field>}
-        </div>
-        {b.panelType === 'פנל מבודד' && (
+        {b.newRoof === 'איסכורית' && (
           <div style={{ marginBottom: 8 }}>
+            <Field label="עובי פח"><SelectBox value={b.thickness1} onChange={v => set({ thickness1: v })} options={SHEET_THICKNESS_OPTS} /></Field>
+          </div>
+        )}
+        {b.newRoof === 'פנל מבודד' && (
+          <div style={grid2}>
+            <Field label="עובי חיצוני"><TextInput value={b.thickness1} onChange={v => set({ thickness1: v })} placeholder="עובי חיצוני" /></Field>
             <Field label="עובי כולל"><TextInput value={b.thickness2} onChange={v => set({ thickness2: v })} placeholder="עובי כולל" /></Field>
           </div>
         )}
@@ -403,11 +410,11 @@ function WorkBlock({ typeKey, blocks, patch }: {
     return (
       <>
         <div style={{ marginBottom: 8 }}>
-          <Field label="סוג"><TextInput value={b.type} onChange={v => set({ type: v })} placeholder="סוג בידוד" /></Field>
+          <Field label="סוג"><SelectBox value={b.type} onChange={v => set({ type: v })} options={INSULATION_TYPE_OPTS} /></Field>
         </div>
         <div style={grid2}>
           <Field label="שטח (מ״ר)"><TextInput type="number" value={b.area} onChange={v => set({ area: v })} placeholder="מ״ר" /></Field>
-          <Field label="עובי"><TextInput value={b.thickness} onChange={v => set({ thickness: v })} placeholder="עובי" /></Field>
+          <Field label="עובי"><SelectBox value={b.thickness} onChange={v => set({ thickness: v })} options={INSULATION_THICKNESS_OPTS} /></Field>
         </div>
       </>
     )
@@ -969,7 +976,7 @@ export default function NewExecutionSheet() {
 
             <Card id="general" title="מאפיינים כלליים" {...noteProps}>
               <div style={grid2}>
-                <Field label="גובה גג"><TextInput type="number" value={form.general.roofHeight} onChange={v => patchGeneral({ roofHeight: v })} placeholder="מ׳" /></Field>
+                <Field label="גובה גג"><SelectBox value={form.general.roofHeight} onChange={v => patchGeneral({ roofHeight: v })} options={ROOF_HEIGHT_OPTS} /></Field>
                 <Field label="שטח (מ״ר)"><TextInput type="number" value={form.general.area} onChange={v => patchGeneral({ area: v })} placeholder="מ״ר" /></Field>
               </div>
               <div style={grid2}>
