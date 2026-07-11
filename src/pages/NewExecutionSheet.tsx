@@ -31,9 +31,22 @@ const GRANDPA_OPTS = ['אין', 'יש']
 const ROOF_HEIGHT_OPTS = ['נמוך עד 3מ׳', 'בינוני 3-6מ׳', 'גבוה 6מ׳+']
 const EXISTING_ROOF_OPTS = ['איסכורית', 'אסבסט', 'רעפים', 'פנלים', 'שינגלס', 'אחר']
 const NEW_ROOF_OPTS = ['איסכורית', 'פנל מבודד', 'רעפים', 'שינגלס', 'אחר']
-const SHEET_THICKNESS_OPTS = ['0.4mm', '0.5mm', '0.6mm', '0.7mm']
+const SHEET_THICKNESS_OPTS = ['0.4', '0.5', '0.55', '0.6', '0.75']
+const FILL_TYPE_OPTS = ['פוליסטירן', 'צמר סלעים', 'פוליסטירן מחוזק', 'אחר']
+const TILE_TYPE_OPTS = ['חרס', 'אקרשטיין', 'אחר']
+const ROOF_COLOR_OPTS = ['לבן', 'שנהב', 'אדום רעפים', 'חום', 'אפור בהיר', 'אפור כהה', 'ירוק', 'כחול', 'גלוון', 'אחר']
 const INSULATION_TYPE_OPTS = ['רדיד אלומיניום', 'צמר סלעים', 'צמר זכוכית', 'אחר']
 const INSULATION_THICKNESS_OPTS = ['5 סמ', '8 סמ', '10 סמ', '12 סמ', 'אחר']
+
+// ── רשימות "סוג" בלשונית חומרים ────────────────────────────────
+const ROOFING_MAT_OPTS  = ['איסכורית', 'פנל מבודד', 'רעפים', 'אחר']
+const FLASHING_MAT_OPTS  = ['רוכב', 'סוגר חזית', 'סוגר צד', 'כובע', 'פלשונג עליון פתוח', 'פלשונג צד 90°', 'אחר']
+const GUTTER_MAT_OPTS    = ['פנימי', 'חיצוני', 'ירידות מרזב', 'אחר']
+const ALUM_MAT_OPTS      = ['4 לוחות', '3 לוחות', '2 לוחות', 'פח פרוס', 'יו', 'אחר']
+const WOOD_MAT_OPTS      = ['לטות', '5×5', '5×10', '5×15', 'אחר']
+const MAT_TYPE_OPTS: Record<string, string[]> = {
+  flashing: FLASHING_MAT_OPTS, gutters: GUTTER_MAT_OPTS, aluminum: ALUM_MAT_OPTS, wood: WOOD_MAT_OPTS,
+}
 
 // ── לשונית התקדמות ─────────────────────────────────────────────
 const PERMIT_SUPERVISORS = ['עמאד', 'סמיר', 'עלי', 'אסף', 'איציק']
@@ -99,8 +112,13 @@ interface AsbestosBlock {
 }
 interface RoofReplaceBlock {
   existingRoof: string; newRoof: string
-  construction: string; slope: string; overhang: string
-  thickness1: string; thickness2: string
+  construction: string; slope: string
+  overhang: string; overhangNote: string
+  sheetThickness: string                         // איסכורית: עובי פח
+  color: string                                  // איסכורית / פנל מבודד: צבע
+  topThickness: string; bottomThickness: string  // פנל מבודד
+  fillType: string                               // פנל מבודד: סוג מילוי
+  tileType: string                               // רעפים: סוג רעף
 }
 interface AluminumBlock { shade: string; meters: string; coating: string[] }
 interface GuttersBlock {
@@ -117,8 +135,13 @@ interface WorkBlocks {
   insulation: InsulationBlock
   other: OtherBlock
 }
-interface MaterialRow { type: string; shade: string; qty: string; measure: string }
-interface MaterialCategory { rows: MaterialRow[]; thickness: string; color: string }
+interface MaterialRow { type: string; typeOther: string; shade: string; qty: string; measure: string; catalog_number: string }
+interface MaterialCategory {
+  rows: MaterialRow[]; thickness: string; color: string
+  // כותרת קירוי (roofing) — "סוג" יחיד לכל הסקשן + שדות תלויי-סוג
+  roofingType: string; sheetThickness: string; roofColor: string
+  topThickness: string; bottomThickness: string; fillType: string; tileType: string
+}
 interface MaterialsState { active: string[]; data: Record<string, MaterialCategory> }
 interface DocItem { path: string; url: string; name: string; note: string; noteOpen: boolean }
 interface Documentation { photos: DocItem[]; sketch: DocItem[]; documents: DocItem[] }
@@ -145,6 +168,7 @@ interface SheetForm {
   documentation: Documentation
   progress: ProgressData
   notes: Record<string, string>
+  others: Record<string, string>   // טקסט חופשי לכל בחירת "אחר", לפי מפתח יציב
 }
 
 // ── ברירות מחדל ────────────────────────────────────────────────
@@ -152,14 +176,21 @@ function todayISO(): string { return new Date().toISOString().slice(0, 10) }
 function emptyBlocks(): WorkBlocks {
   return {
     asbestos:    { coordX: '', coordY: '', usedFor: '', ceiling: '', ceilingConstruction: '', grandpaStick: '', sensitive: '' },
-    roofReplace: { existingRoof: '', newRoof: '', construction: '', slope: '', overhang: '', thickness1: '', thickness2: '' },
+    roofReplace: { existingRoof: '', newRoof: '', construction: '', slope: '', overhang: '', overhangNote: '', sheetThickness: '', color: '', topThickness: '', bottomThickness: '', fillType: '', tileType: '' },
     aluminum:    { shade: '', meters: '', coating: [] },
     gutters:     { type: '', guttersM: '', guttersSegments: '', downUnits: '', downSegments: '' },
     insulation:  { type: '', area: '', thickness: '' },
     other:       { note: '' },
   }
 }
-function emptyCategory(): MaterialCategory { return { rows: [{ type: '', shade: '', qty: '', measure: '' }], thickness: '', color: '' } }
+function emptyRow(): MaterialRow { return { type: '', typeOther: '', shade: '', qty: '', measure: '', catalog_number: '' } }
+function emptyCategory(): MaterialCategory {
+  return {
+    rows: [emptyRow()], thickness: '', color: '',
+    roofingType: '', sheetThickness: '', roofColor: '',
+    topThickness: '', bottomThickness: '', fillType: '', tileType: '',
+  }
+}
 function emptyProgress(): ProgressData {
   return {
     asbestos_permit: { submission_date: '', approval_date: '', permit_number: '', supervisor: '' },
@@ -179,7 +210,19 @@ function emptyForm(): SheetForm {
     documentation: { photos: [], sketch: [], documents: [] },
     progress: emptyProgress(),
     notes: {},
+    others: {},
   }
+}
+// השלמת שדות חדשים על נתוני חומרים ישנים (catalog_number, typeOther, כותרת קירוי)
+function normalizeMaterials(raw: unknown, fallback: MaterialsState): MaterialsState {
+  const m = raw as MaterialsState | undefined
+  if (!m || !m.active) return fallback
+  const data: Record<string, MaterialCategory> = {}
+  for (const k of m.active) {
+    const c = m.data?.[k] ?? emptyCategory()
+    data[k] = { ...emptyCategory(), ...c, rows: (c.rows ?? []).map(r => ({ ...emptyRow(), ...r })) }
+  }
+  return { active: m.active, data }
 }
 function daysSince(iso: string): number {
   const d = new Date(iso)
@@ -232,6 +275,41 @@ function SelectBox({ value, onChange, options, placeholder = 'בחר' }: {
       <option value="" disabled hidden>{placeholder}</option>
       {options.map(o => <option key={o} value={o}>{o}</option>)}
     </select>
+  )
+}
+// שדה טקסט קצר שמופיע כשנבחר "אחר" (מפתח יציב במפת others)
+function OtherText({ okey, others, setOther, maxLen = 20 }: {
+  okey: string; others: Record<string, string>; setOther: (k: string, v: string) => void; maxLen?: number
+}) {
+  return (
+    <input dir="rtl" maxLength={maxLen} value={others[okey] ?? ''} placeholder="פירוט…"
+      onChange={e => setOther(okey, e.target.value)} style={{ ...inputStyle, marginTop: 6 }} />
+  )
+}
+// dropdown שמראה אוטומטית שדה טקסט קצר כשנבחר "אחר" — הדפוס הגלובלי בטופס
+function SelectOther({ value, onChange, options, okey, others, setOther, placeholder = 'בחר', maxLen = 20 }: {
+  value: string; onChange: (v: string) => void; options: string[]
+  okey: string; others: Record<string, string>; setOther: (k: string, v: string) => void
+  placeholder?: string; maxLen?: number
+}) {
+  return (
+    <>
+      <SelectBox value={value} onChange={onChange} options={options} placeholder={placeholder} />
+      {value === 'אחר' && <OtherText okey={okey} others={others} setOther={setOther} maxLen={maxLen} />}
+    </>
+  )
+}
+// textarea עם גובה שמתרחב אוטומטית עם התוכן (מתחיל בשורה אחת)
+function AutoTextArea({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
+  const ref = useRef<HTMLTextAreaElement>(null)
+  useEffect(() => {
+    const el = ref.current
+    if (el) { el.style.height = 'auto'; el.style.height = `${el.scrollHeight}px` }
+  }, [value])
+  return (
+    <textarea ref={ref} dir="rtl" rows={1} value={value} placeholder={placeholder}
+      onChange={e => onChange(e.target.value)}
+      style={{ ...inputStyle, height: 'auto', minHeight: 36, padding: '8px 10px', resize: 'none', overflow: 'hidden', lineHeight: 1.4 }} />
   )
 }
 function TextArea({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
@@ -316,9 +394,11 @@ function Card({ id, title, tone = 'default', notes, setNotes, notesOpen, toggleN
 }
 
 // ── בלוק דינמי לפי סוג עבודה ───────────────────────────────────
-function WorkBlock({ typeKey, blocks, patch }: {
+function WorkBlock({ typeKey, blocks, patch, others, setOther }: {
   typeKey: string; blocks: WorkBlocks; patch: (p: Partial<WorkBlocks>) => void
+  others: Record<string, string>; setOther: (k: string, v: string) => void
 }) {
+  const oProps = { others, setOther }
   if (typeKey === 'asbestos') {
     const b = blocks.asbestos
     const set = (p: Partial<AsbestosBlock>) => patch({ asbestos: { ...b, ...p } })
@@ -328,17 +408,15 @@ function WorkBlock({ typeKey, blocks, patch }: {
           <Field label="נ.צ. X"><TextInput value={b.coordX} onChange={v => set({ coordX: v })} placeholder="X" /></Field>
           <Field label="נ.צ. Y"><TextInput value={b.coordY} onChange={v => set({ coordY: v })} placeholder="Y" /></Field>
         </div>
-        <div style={{ marginBottom: 8 }}>
-          <Field label="למה משמש"><SelectBox value={b.usedFor} onChange={v => set({ usedFor: v })} options={USED_FOR_OPTS} /></Field>
+        <div style={grid2}>
+          <Field label="למה משמש"><SelectOther value={b.usedFor} onChange={v => set({ usedFor: v })} options={USED_FOR_OPTS} okey="asb.usedFor" {...oProps} /></Field>
+          <Field label="קונסטרוקציה"><SelectOther value={b.ceilingConstruction} onChange={v => set({ ceilingConstruction: v })} options={CONSTRUCTIONS} okey="asb.construction" {...oProps} /></Field>
         </div>
         <div style={grid2}>
-          <Field label="תקרה קשיחה"><SelectBox value={b.ceiling} onChange={v => set({ ceiling: v })} options={CEILING_OPTS} /></Field>
-          <Field label="קונסטרוקציה"><SelectBox value={b.ceilingConstruction} onChange={v => set({ ceilingConstruction: v })} options={CONSTRUCTIONS} /></Field>
-        </div>
-        <div style={{ marginBottom: 8 }}>
+          <Field label="תקרה קשיחה"><SelectOther value={b.ceiling} onChange={v => set({ ceiling: v })} options={CEILING_OPTS} okey="asb.ceiling" {...oProps} /></Field>
           <Field label="מקל סבא"><SelectBox value={b.grandpaStick} onChange={v => set({ grandpaStick: v })} options={GRANDPA_OPTS} /></Field>
         </div>
-        <Field label="מבנים רגישים"><TextArea value={b.sensitive} onChange={v => set({ sensitive: v })} placeholder="מבנים רגישים בסביבה" /></Field>
+        <Field label="מבנים רגישים"><AutoTextArea value={b.sensitive} onChange={v => set({ sensitive: v })} placeholder="מבנים רגישים בסביבה" /></Field>
       </>
     )
   }
@@ -348,25 +426,39 @@ function WorkBlock({ typeKey, blocks, patch }: {
     return (
       <>
         <div style={grid2}>
-          <Field label="גג קיים"><SelectBox value={b.existingRoof} onChange={v => set({ existingRoof: v })} options={EXISTING_ROOF_OPTS} /></Field>
-          <Field label="גג חדש"><SelectBox value={b.newRoof} onChange={v => set({ newRoof: v })} options={NEW_ROOF_OPTS} /></Field>
+          <Field label="גג קיים"><SelectOther value={b.existingRoof} onChange={v => set({ existingRoof: v })} options={EXISTING_ROOF_OPTS} okey="rr.existingRoof" {...oProps} /></Field>
+          <Field label="גג חדש"><SelectOther value={b.newRoof} onChange={v => set({ newRoof: v })} options={NEW_ROOF_OPTS} okey="rr.newRoof" {...oProps} /></Field>
         </div>
         <div style={grid2}>
-          <Field label="קונסטרוקציה"><SelectBox value={b.construction} onChange={v => set({ construction: v })} options={CONSTRUCTIONS} /></Field>
+          <Field label="קונסטרוקציה"><SelectOther value={b.construction} onChange={v => set({ construction: v })} options={CONSTRUCTIONS} okey="rr.construction" {...oProps} /></Field>
           <Field label="שיפוע"><TextInput value={b.slope} onChange={v => set({ slope: v })} placeholder="שיפוע" /></Field>
         </div>
-        <div style={{ marginBottom: 8 }}>
-          <Field label="בליטה מהפטות"><TextInput value={b.overhang} onChange={v => set({ overhang: v })} placeholder="בליטה מהפטות" /></Field>
+        {/* בליטה מהפתות: מספר מימין + הערה קצרה לשדה זה בלבד משמאל */}
+        <div style={grid2}>
+          <Field label="בליטה מהפתות"><TextInput type="number" value={b.overhang} onChange={v => set({ overhang: v })} placeholder="מ׳" /></Field>
+          <Field label="הערה"><TextInput value={b.overhangNote} onChange={v => set({ overhangNote: v })} placeholder="הערה…" /></Field>
         </div>
         {b.newRoof === 'איסכורית' && (
-          <div style={{ marginBottom: 8 }}>
-            <Field label="עובי פח"><SelectBox value={b.thickness1} onChange={v => set({ thickness1: v })} options={SHEET_THICKNESS_OPTS} /></Field>
+          <div style={grid2}>
+            <Field label="עובי פח"><SelectBox value={b.sheetThickness} onChange={v => set({ sheetThickness: v })} options={SHEET_THICKNESS_OPTS} /></Field>
+            <Field label="צבע"><SelectOther value={b.color} onChange={v => set({ color: v })} options={ROOF_COLOR_OPTS} okey="rr.color" {...oProps} /></Field>
           </div>
         )}
         {b.newRoof === 'פנל מבודד' && (
-          <div style={grid2}>
-            <Field label="עובי חיצוני"><TextInput value={b.thickness1} onChange={v => set({ thickness1: v })} placeholder="עובי חיצוני" /></Field>
-            <Field label="עובי כולל"><TextInput value={b.thickness2} onChange={v => set({ thickness2: v })} placeholder="עובי כולל" /></Field>
+          <>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 8 }}>
+              <Field label="עובי פח עליון"><SelectBox value={b.topThickness} onChange={v => set({ topThickness: v })} options={SHEET_THICKNESS_OPTS} /></Field>
+              <Field label="עובי פח תחתון"><SelectBox value={b.bottomThickness} onChange={v => set({ bottomThickness: v })} options={SHEET_THICKNESS_OPTS} /></Field>
+              <Field label="סוג מילוי"><SelectOther value={b.fillType} onChange={v => set({ fillType: v })} options={FILL_TYPE_OPTS} okey="rr.fillType" {...oProps} /></Field>
+            </div>
+            <div style={{ marginBottom: 8 }}>
+              <Field label="צבע"><SelectOther value={b.color} onChange={v => set({ color: v })} options={ROOF_COLOR_OPTS} okey="rr.color" {...oProps} /></Field>
+            </div>
+          </>
+        )}
+        {b.newRoof === 'רעפים' && (
+          <div style={{ marginBottom: 8 }}>
+            <Field label="סוג רעף"><SelectOther value={b.tileType} onChange={v => set({ tileType: v })} options={TILE_TYPE_OPTS} okey="rr.tileType" {...oProps} /></Field>
           </div>
         )}
       </>
@@ -378,7 +470,7 @@ function WorkBlock({ typeKey, blocks, patch }: {
     return (
       <>
         <div style={grid2}>
-          <Field label="גוון"><SelectBox value={b.shade} onChange={v => set({ shade: v })} options={ALUM_SHADES} /></Field>
+          <Field label="גוון"><SelectOther value={b.shade} onChange={v => set({ shade: v })} options={ALUM_SHADES} okey="alum.shade" {...oProps} /></Field>
           <Field label="מטרים"><TextInput type="number" value={b.meters} onChange={v => set({ meters: v })} placeholder="מ׳" /></Field>
         </div>
         <Field label="מיקום"><ChipGroup options={['פנים', 'תקרה']} value={b.coating} onChange={v => set({ coating: v })} /></Field>
@@ -391,7 +483,7 @@ function WorkBlock({ typeKey, blocks, patch }: {
     return (
       <>
         <div style={{ marginBottom: 8 }}>
-          <Field label="סוג"><SelectBox value={b.type} onChange={v => set({ type: v })} options={GUTTER_TYPES} /></Field>
+          <Field label="סוג"><SelectOther value={b.type} onChange={v => set({ type: v })} options={GUTTER_TYPES} okey="gut.type" {...oProps} /></Field>
         </div>
         <div style={grid2}>
           <Field label="מרזבים (מ׳)"><TextInput type="number" value={b.guttersM} onChange={v => set({ guttersM: v })} placeholder="מ׳" /></Field>
@@ -410,11 +502,11 @@ function WorkBlock({ typeKey, blocks, patch }: {
     return (
       <>
         <div style={{ marginBottom: 8 }}>
-          <Field label="סוג"><SelectBox value={b.type} onChange={v => set({ type: v })} options={INSULATION_TYPE_OPTS} /></Field>
+          <Field label="סוג"><SelectOther value={b.type} onChange={v => set({ type: v })} options={INSULATION_TYPE_OPTS} okey="ins.type" {...oProps} /></Field>
         </div>
         <div style={grid2}>
           <Field label="שטח (מ״ר)"><TextInput type="number" value={b.area} onChange={v => set({ area: v })} placeholder="מ״ר" /></Field>
-          <Field label="עובי"><SelectBox value={b.thickness} onChange={v => set({ thickness: v })} options={INSULATION_THICKNESS_OPTS} /></Field>
+          <Field label="עובי"><SelectOther value={b.thickness} onChange={v => set({ thickness: v })} options={INSULATION_THICKNESS_OPTS} okey="ins.thickness" {...oProps} /></Field>
         </div>
       </>
     )
@@ -425,14 +517,19 @@ function WorkBlock({ typeKey, blocks, patch }: {
 }
 
 // ── כרטיסיית קטגוריית חומרים ───────────────────────────────────
-function MaterialCategoryCard({ catKey, cat, onChange, onRemove }: {
+function MaterialCategoryCard({ catKey, cat, onChange, onRemove, others, setOther }: {
   catKey: string; cat: MaterialCategory; onChange: (c: MaterialCategory) => void; onRemove: () => void
+  others: Record<string, string>; setOther: (k: string, v: string) => void
 }) {
   const meta = CATEGORY_META[catKey]
+  const isRoofing = catKey === 'roofing'
+  const typeOpts = MAT_TYPE_OPTS[catKey]           // "סוג" כ-dropdown לכל שורה (undefined לקירוי/בידוד)
+  const otherLen = catKey === 'wood' ? 25 : 20
   const total = cat.rows.reduce((s, r) => s + num(r.qty) * num(r.measure), 0)
   function setRow(i: number, p: Partial<MaterialRow>) {
     onChange({ ...cat, rows: cat.rows.map((r, j) => j === i ? { ...r, ...p } : r) })
   }
+  const ok = (k: string) => `mat.${catKey}.${k}`
   return (
     <div style={{ background: '#fff', margin: '6px 8px', borderRadius: 10, boxShadow: '0 1px 3px rgba(0,0,0,0.07)', overflow: 'hidden' }}>
       <div style={{
@@ -448,35 +545,72 @@ function MaterialCategoryCard({ catKey, cat, onChange, onRemove }: {
         }}>−</button>
       </div>
       <div style={{ padding: 10 }}>
-        {meta.roofSub && (
-          <div style={grid2}>
-            <Field label="עובי"><TextInput value={cat.thickness} onChange={v => onChange({ ...cat, thickness: v })} placeholder="עובי" /></Field>
-            <Field label="צבע"><TextInput value={cat.color} onChange={v => onChange({ ...cat, color: v })} placeholder="צבע" /></Field>
+        {/* קירוי — "סוג" יחיד בראש הסקשן + שדות תלויי-סוג */}
+        {isRoofing && (
+          <div style={{ marginBottom: 10, paddingBottom: 10, borderBottom: `1px solid ${BORDER}` }}>
+            <div style={{ marginBottom: 8 }}>
+              <Field label="סוג"><SelectOther value={cat.roofingType} onChange={v => onChange({ ...cat, roofingType: v })} options={ROOFING_MAT_OPTS} okey={ok('roofingType')} others={others} setOther={setOther} /></Field>
+            </div>
+            {cat.roofingType === 'איסכורית' && (
+              <div style={grid2}>
+                <Field label="עובי"><SelectBox value={cat.sheetThickness} onChange={v => onChange({ ...cat, sheetThickness: v })} options={SHEET_THICKNESS_OPTS} /></Field>
+                <Field label="צבע"><SelectOther value={cat.roofColor} onChange={v => onChange({ ...cat, roofColor: v })} options={ROOF_COLOR_OPTS} okey={ok('roofColor')} others={others} setOther={setOther} /></Field>
+              </div>
+            )}
+            {cat.roofingType === 'פנל מבודד' && (
+              <>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+                  <Field label="עובי פח עליון"><SelectBox value={cat.topThickness} onChange={v => onChange({ ...cat, topThickness: v })} options={SHEET_THICKNESS_OPTS} /></Field>
+                  <Field label="עובי פח תחתון"><SelectBox value={cat.bottomThickness} onChange={v => onChange({ ...cat, bottomThickness: v })} options={SHEET_THICKNESS_OPTS} /></Field>
+                </div>
+                <Field label="צבע"><SelectOther value={cat.roofColor} onChange={v => onChange({ ...cat, roofColor: v })} options={ROOF_COLOR_OPTS} okey={ok('roofColor')} others={others} setOther={setOther} /></Field>
+              </>
+            )}
+            {cat.roofingType === 'רעפים' && (
+              <Field label="סוג רעף"><SelectOther value={cat.tileType} onChange={v => onChange({ ...cat, tileType: v })} options={TILE_TYPE_OPTS} okey={ok('tileType')} others={others} setOther={setOther} /></Field>
+            )}
           </div>
         )}
         {cat.rows.map((r, i) => (
-          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 8, direction: 'rtl' }}>
-            <input dir="rtl" style={{ ...inputStyle, flex: meta.hasShade ? 1.3 : 2 }} placeholder="סוג"
-              value={r.type} onChange={e => setRow(i, { type: e.target.value })} />
-            {meta.hasShade && (
-              <input dir="rtl" style={{ ...inputStyle, flex: 1.1 }} placeholder="גוון"
-                value={r.shade} onChange={e => setRow(i, { shade: e.target.value })} />
+          <div key={i} style={{ marginBottom: 8, direction: 'rtl' }}>
+            {typeOpts && (
+              <div style={{ marginBottom: 6 }}>
+                <select dir="rtl" value={r.type} onChange={e => setRow(i, { type: e.target.value })}
+                  style={{ ...inputStyle, color: r.type ? '#111' : '#555', appearance: 'none', cursor: 'pointer' }}>
+                  <option value="" disabled hidden>סוג</option>
+                  {typeOpts.map(o => <option key={o} value={o}>{o}</option>)}
+                </select>
+                {r.type === 'אחר' && (
+                  <input dir="rtl" maxLength={otherLen} value={r.typeOther} placeholder="פירוט…"
+                    onChange={e => setRow(i, { typeOther: e.target.value })} style={{ ...inputStyle, marginTop: 6 }} />
+                )}
+              </div>
             )}
-            <input dir="rtl" type="number" inputMode="numeric" style={{ ...inputStyle, flex: 0.8, padding: '0 6px' }} placeholder="יח׳"
-              value={r.qty} onChange={e => setRow(i, { qty: e.target.value })} />
-            <span style={{ color: GREY, fontWeight: 800, fontSize: 12 }}>×</span>
-            <input dir="rtl" type="number" inputMode="decimal" style={{ ...inputStyle, flex: 0.8, padding: '0 6px' }} placeholder={meta.unit}
-              value={r.measure} onChange={e => setRow(i, { measure: e.target.value })} />
-            <span style={{ color: GREY, fontWeight: 800, fontSize: 12 }}>=</span>
-            <span style={{ flex: 0.8, textAlign: 'center', fontSize: 13, fontWeight: 800, color: meta.color }}>{fmt(num(r.qty) * num(r.measure))}</span>
-            <button type="button" onClick={() => onChange({ ...cat, rows: cat.rows.filter((_, j) => j !== i) })}
-              disabled={cat.rows.length <= 1} style={{
-                background: 'none', border: 'none', color: cat.rows.length <= 1 ? '#DDD' : GREY,
-                cursor: cat.rows.length <= 1 ? 'default' : 'pointer', fontSize: 18, lineHeight: 1, padding: '0 2px', fontFamily: 'inherit',
-              }}>×</button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5, direction: 'rtl' }}>
+              {!typeOpts && !isRoofing && (
+                <input dir="rtl" style={{ ...inputStyle, flex: meta.hasShade ? 1.3 : 2 }} placeholder="סוג"
+                  value={r.type} onChange={e => setRow(i, { type: e.target.value })} />
+              )}
+              {meta.hasShade && (
+                <input dir="rtl" style={{ ...inputStyle, flex: 1.1 }} placeholder="גוון"
+                  value={r.shade} onChange={e => setRow(i, { shade: e.target.value })} />
+              )}
+              <input dir="rtl" type="number" inputMode="numeric" style={{ ...inputStyle, flex: 0.8, padding: '0 6px' }} placeholder="יח׳"
+                value={r.qty} onChange={e => setRow(i, { qty: e.target.value })} />
+              <span style={{ color: GREY, fontWeight: 800, fontSize: 12 }}>×</span>
+              <input dir="rtl" type="number" inputMode="decimal" style={{ ...inputStyle, flex: 0.8, padding: '0 6px' }} placeholder={meta.unit}
+                value={r.measure} onChange={e => setRow(i, { measure: e.target.value })} />
+              <span style={{ color: GREY, fontWeight: 800, fontSize: 12 }}>=</span>
+              <span style={{ flex: 0.8, textAlign: 'center', fontSize: 13, fontWeight: 800, color: meta.color }}>{fmt(num(r.qty) * num(r.measure))}</span>
+              <button type="button" onClick={() => onChange({ ...cat, rows: cat.rows.filter((_, j) => j !== i) })}
+                disabled={cat.rows.length <= 1} style={{
+                  background: 'none', border: 'none', color: cat.rows.length <= 1 ? '#DDD' : GREY,
+                  cursor: cat.rows.length <= 1 ? 'default' : 'pointer', fontSize: 18, lineHeight: 1, padding: '0 2px', fontFamily: 'inherit',
+                }}>×</button>
+            </div>
           </div>
         ))}
-        <button type="button" onClick={() => onChange({ ...cat, rows: [...cat.rows, { type: '', shade: '', qty: '', measure: '' }] })}
+        <button type="button" onClick={() => onChange({ ...cat, rows: [...cat.rows, emptyRow()] })}
           style={{ background: 'none', border: 'none', color: meta.color, fontSize: 13, fontWeight: 800, cursor: 'pointer', padding: '4px 0', fontFamily: 'inherit' }}>
           ＋ הוסף שורה
         </button>
@@ -544,15 +678,19 @@ function DocSection({ icon, title, subtitle, items, onAdd, onRemove, onNote, upl
 }
 
 // ── לשונית התקדמות ─────────────────────────────────────────────
-function PSelect({ value, onChange, options, emptyLabel = '— בחר —', accent }: {
+function PSelect({ value, onChange, options, emptyLabel = '— בחר —', accent, okey, others, setOther }: {
   value: string; onChange: (v: string) => void; options: string[]; emptyLabel?: string; accent?: string
+  okey?: string; others?: Record<string, string>; setOther?: (k: string, v: string) => void
 }) {
   return (
-    <select dir="rtl" value={value} onChange={e => onChange(e.target.value)}
-      style={{ ...inputStyle, color: value ? '#111' : '#555', appearance: 'none', cursor: 'pointer', ...(accent ? { borderColor: accent } : {}) }}>
-      <option value="">{emptyLabel}</option>
-      {options.map(o => <option key={o} value={o}>{o}</option>)}
-    </select>
+    <>
+      <select dir="rtl" value={value} onChange={e => onChange(e.target.value)}
+        style={{ ...inputStyle, color: value ? '#111' : '#555', appearance: 'none', cursor: 'pointer', ...(accent ? { borderColor: accent } : {}) }}>
+        <option value="">{emptyLabel}</option>
+        {options.map(o => <option key={o} value={o}>{o}</option>)}
+      </select>
+      {value === 'אחר' && okey && others && setOther && <OtherText okey={okey} others={others} setOther={setOther} />}
+    </>
   )
 }
 
@@ -577,8 +715,9 @@ function SummaryLine({ icon, text, bg }: { icon: string; text: string; bg: strin
   )
 }
 
-function ProgressTab({ progress, workTypes, onChange }: {
+function ProgressTab({ progress, workTypes, onChange, others, setOther }: {
   progress: ProgressData; workTypes: string[]; onChange: (p: Partial<ProgressData>) => void
+  others: Record<string, string>; setOther: (k: string, v: string) => void
 }) {
   const p = progress
   const setPermit = (patch: Partial<AsbestosPermit>) => onChange({ asbestos_permit: { ...p.asbestos_permit, ...patch } })
@@ -615,7 +754,8 @@ function ProgressTab({ progress, workTypes, onChange }: {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 10 }}>
           {p.suppliers.map((s, i) => (
             <PSelect key={i} value={s} options={i % 3 === 0 ? ROOFING_SUPPLIERS : ALL_SUPPLIERS}
-              emptyLabel={i % 3 === 0 ? '— קירוי —' : '— ספק —'} onChange={v => setSupplier(i, v)} />
+              emptyLabel={i % 3 === 0 ? '— קירוי —' : '— ספק —'} onChange={v => setSupplier(i, v)}
+              okey={`prog.supplier.${i}`} others={others} setOther={setOther} />
           ))}
         </div>
         <div style={grid2}>
@@ -631,7 +771,7 @@ function ProgressTab({ progress, workTypes, onChange }: {
         </div>
         <div style={grid2}>
           <Field label="ראש צוות"><PSelect value={p.team_lead} options={TEAM_LEADS} accent="#1A5A2A" onChange={v => onChange({ team_lead: v })} /></Field>
-          <Field label="קבלן משנה"><PSelect value={p.subcontractor} options={SUBCONTRACTORS} emptyLabel="— ללא —" accent="#1A5A2A" onChange={v => onChange({ subcontractor: v })} /></Field>
+          <Field label="קבלן משנה"><PSelect value={p.subcontractor} options={SUBCONTRACTORS} emptyLabel="— ללא —" accent="#1A5A2A" onChange={v => onChange({ subcontractor: v })} okey="prog.subcontractor" others={others} setOther={setOther} /></Field>
         </div>
       </Card>
 
@@ -679,6 +819,7 @@ export default function NewExecutionSheet() {
   const patchBlocks = (p: Partial<WorkBlocks>) => setForm(f => ({ ...f, blocks: { ...f.blocks, ...p } }))
   const patchProgress = (p: Partial<ProgressData>) => setForm(f => ({ ...f, progress: { ...f.progress, ...p } }))
   const setNote = (k: string, v: string) => setForm(f => ({ ...f, notes: { ...f.notes, [k]: v } }))
+  const setOther = (k: string, v: string) => setForm(f => ({ ...f, others: { ...f.others, [k]: v } }))
   const toggleNote = (k: string) => setNotesOpen(prev => { const n = new Set(prev); n.has(k) ? n.delete(k) : n.add(k); return n })
 
   function toggleWorkType(key: string) {
@@ -714,7 +855,7 @@ export default function NewExecutionSheet() {
         logistics: { ...base.logistics, ...(wc.logistics ?? {}) },
         workTypes: wc.workTypes ?? (b?.work_types ?? []),
         blocks: { ...emptyBlocks(), ...(wc.blocks ?? {}) },
-        materials: (b?.materials && (b.materials as MaterialsState).active) ? (b.materials as MaterialsState) : base.materials,
+        materials: normalizeMaterials(b?.materials, base.materials),
         documentation: { ...base.documentation, ...(wc.documentation ?? {}) },
         progress: (() => {
           const bp = emptyProgress()
@@ -727,6 +868,7 @@ export default function NewExecutionSheet() {
           }
         })(),
         notes: wc.notes ?? {},
+        others: wc.others ?? {},
       }
       // חתימות URL מחדש לתמונות (bucket פרטי)
       for (const sec of ['photos', 'sketch', 'documents'] as const) {
@@ -802,6 +944,7 @@ export default function NewExecutionSheet() {
           documents: f.documentation.documents.map(stripDoc),
         },
         notes: f.notes,
+        others: f.others,
       },
       materials: f.materials,
     }
@@ -858,12 +1001,16 @@ export default function NewExecutionSheet() {
 
   // ── העלאת קבצים ל-storage: sheet-images ───────────────────────
   async function uploadDocs(section: keyof Documentation, files: FileList) {
+    // חובה להעתיק את הקבצים למערך לפני כל await: ה-onChange של ה-input מאפס
+    // את value='' מיד אחרי הקריאה, מה שמרוקן את ה-FileList לפני שנגיע לולאה
+    // (בגלל זה תמונות "לא נשמרו" והמונה נשאר 0).
+    const fileArr = Array.from(files)
     setUploading(true)
     try {
       const sid = await ensureSheetId()
       if (!sid) { alert(lastErrRef.current ?? 'צריך לשמור את הדף לפני העלאה'); return }
       const added: DocItem[] = []
-      for (const file of Array.from(files)) {
+      for (const file of fileArr) {
         const safe = file.name.replace(/[^\w.\-]/g, '_')
         const path = `${sid}/${section}/${Date.now()}_${safe}`
         const { error } = await supabase.storage.from('sheet-images').upload(path, file, { upsert: true })
@@ -980,15 +1127,15 @@ export default function NewExecutionSheet() {
                 <Field label="שטח (מ״ר)"><TextInput type="number" value={form.general.area} onChange={v => patchGeneral({ area: v })} placeholder="מ״ר" /></Field>
               </div>
               <div style={grid2}>
-                <Field label="סוג גג"><SelectBox value={form.general.roofType} onChange={v => patchGeneral({ roofType: v })} options={ROOF_TYPES} /></Field>
-                <Field label="קונסטרוקציה"><SelectBox value={form.general.construction} onChange={v => patchGeneral({ construction: v })} options={CONSTRUCTIONS} /></Field>
+                <Field label="סוג גג"><SelectOther value={form.general.roofType} onChange={v => patchGeneral({ roofType: v })} options={ROOF_TYPES} okey="gen.roofType" others={form.others} setOther={setOther} /></Field>
+                <Field label="קונסטרוקציה"><SelectOther value={form.general.construction} onChange={v => patchGeneral({ construction: v })} options={CONSTRUCTIONS} okey="gen.construction" others={form.others} setOther={setOther} /></Field>
               </div>
               <ChipGroup options={GENERAL_CHIPS} value={form.general.chips} onChange={v => patchGeneral({ chips: v })} />
             </Card>
 
             <Card id="logistics" title="לוגיסטיקה" {...noteProps}>
               <div style={grid2}>
-                <Field label="מנוף"><SelectBox value={form.logistics.crane} onChange={v => patchLogistics({ crane: v })} options={CRANE_OPTS} /></Field>
+                <Field label="מנוף"><SelectOther value={form.logistics.crane} onChange={v => patchLogistics({ crane: v })} options={CRANE_OPTS} okey="log.crane" others={form.others} setOther={setOther} /></Field>
                 <Field label="מכולה"><SelectBox value={form.logistics.container} onChange={v => patchLogistics({ container: v })} options={CONTAINER_OPTS} /></Field>
               </div>
               <div style={grid2}>
@@ -1020,7 +1167,7 @@ export default function NewExecutionSheet() {
 
             {form.workTypes.map(key => (
               <Card key={key} title={WORK_TYPE_LABEL[key]} tone="orange">
-                <WorkBlock typeKey={key} blocks={form.blocks} patch={patchBlocks} />
+                <WorkBlock typeKey={key} blocks={form.blocks} patch={patchBlocks} others={form.others} setOther={setOther} />
               </Card>
             ))}
 
@@ -1050,7 +1197,7 @@ export default function NewExecutionSheet() {
           <>
             {form.materials.active.map(key => (
               <MaterialCategoryCard key={key} catKey={key} cat={form.materials.data[key] ?? emptyCategory()}
-                onChange={c => setCategory(key, c)} onRemove={() => removeCategory(key)} />
+                onChange={c => setCategory(key, c)} onRemove={() => removeCategory(key)} others={form.others} setOther={setOther} />
             ))}
             {inactiveCats.length > 0 && (
               <div style={{ margin: '6px 8px' }}>
@@ -1068,7 +1215,7 @@ export default function NewExecutionSheet() {
 
         {/* ══ לשונית התקדמות ══ */}
         {tab === 'progress' && (
-          <ProgressTab progress={form.progress} workTypes={form.workTypes} onChange={patchProgress} />
+          <ProgressTab progress={form.progress} workTypes={form.workTypes} onChange={patchProgress} others={form.others} setOther={setOther} />
         )}
       </div>
 
