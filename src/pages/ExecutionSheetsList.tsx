@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 
@@ -28,33 +28,48 @@ export default function ExecutionSheetsList() {
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
 
+  // מונה בקשות: רק התוצאה של הטעינה האחרונה מעדכנת את הנתונים, כדי שבקשה איטית/תקועה
+  // שהתחילה מוקדם לא תדרוס תוצאה טרייה יותר.
+  const reqSeq = useRef(0)
+  // מזהה הטעינה היזומה האחרונה — היא זו שאחראית לכבות את הספינר.
+  const fgSeq = useRef(0)
+  // האם כבר הצגנו נתונים בהצלחה פעם אחת (במהלך החיים של הרכיב הזה).
+  const loadedOnce = useRef(false)
+
   useEffect(() => {
     loadSheets()
 
     // Race condition: חוזרים לרשימה מיד אחרי navigate מדף שנשמר, והשורה
     // החדשה עלולה לא להופיע עדיין (replication lag / commit שטרם נראה).
-    // טעינה חוזרת אחרי 500ms תופסת את הדף שזה עתה נשמר.
-    const raceTimer = setTimeout(() => loadSheets(), 500)
+    // טעינה חוזרת אחרי 500ms תופסת את הדף שזה עתה נשמר — כרענון רקע, בלי ספינר.
+    const raceTimer = setTimeout(() => loadSheets({ background: true }), 500)
 
-    // Realtime — refresh when a sheet is added/changed
+    // Realtime — refresh when a sheet is added/changed.
+    // שם ערוץ ייחודי לכל mount: מונע התנגשות topic כשחוזרים לרשימה מיד אחרי
+    // סגירת דף (ה-unmount הקודם עדיין משחרר את הערוץ), שהייתה תוקעת את ה-resubscribe.
     const channel = supabase
-      .channel('execution-sheets-list')
+      .channel(`execution-sheets-list-${reqSeq.current}-${Math.random().toString(36).slice(2)}`)
       .on('postgres_changes', {
         event: '*',
         schema: 'public',
         table: 'execution_sheets',
       }, () => {
-        loadSheets()
+        loadSheets({ background: true })
       })
       .subscribe()
 
     return () => { clearTimeout(raceTimer); supabase.removeChannel(channel) }
   }, [])
 
-  async function loadSheets() {
-    console.log('[sheets] loadSheets: start')
-    setLoading(true)
-    setError(null)
+  // background=true → רענון שקט: לא מדליק את מסך הטעינה ולא מציג שגיאה על נתונים קיימים.
+  // background=false → טעינה יזומה (mount / "נסה שוב") שמציגה ספינר.
+  async function loadSheets({ background = false }: { background?: boolean } = {}) {
+    const seq = ++reqSeq.current
+    if (!background) {
+      fgSeq.current = seq
+      setLoading(true)
+      setError(null)
+    }
 
     // Guard against a request/session-refresh that never settles (seen on iOS PWA,
     // where supabase-js can stall on the auth lock and the query promise hangs forever).
@@ -73,20 +88,32 @@ export default function ExecutionSheetsList() {
       const { data, error } = await Promise.race([query, timeout]) as
         { data: SheetRow[] | null; error: { message: string } | null }
 
+      // בקשה מיושנת — טעינה חדשה יותר כבר רצה/הסתיימה. אל תיגע ב-state.
+      if (seq !== reqSeq.current) return
+
       if (error) {
         console.error('[sheets] query error:', error)
-        setError('שגיאה בטעינת דפי הביצוע')
+        if (!loadedOnce.current) setError('שגיאה בטעינת דפי הביצוע')
         return
       }
 
-      console.log('[sheets] loaded rows:', data?.length ?? 0, data)
       setSheets((data ?? []) as SheetRow[])
+      setError(null)
+      loadedOnce.current = true
+      // ברגע שיש נתונים להציג — מכבים את הספינר, גם אם זו טעינת רקע. אחרת, אם
+      // טעינת ה-mount היזומה נתקעת (רענון טוקן אחרי סגירת דף), הרשת הייתה נשארת
+      // על "טוען דפי ביצוע..." עד ה-timeout של 12 שניות למרות שהנתונים כבר הגיעו.
+      setLoading(false)
     } catch (e) {
       console.error('[sheets] loadSheets failed:', e)
-      setError('לא הצלחנו לטעון את דפי הביצוע. בדוק את החיבור ונסה שוב.')
+      // רק אם מעולם לא הצלחנו לטעון מציגים שגיאה; רענון רקע כושל לא ידרוס נתונים קיימים.
+      if (seq === reqSeq.current && !loadedOnce.current) {
+        setError('לא הצלחנו לטעון את דפי הביצוע. בדוק את החיבור ונסה שוב.')
+      }
     } finally {
       clearTimeout(timer)
-      setLoading(false)
+      // רק טעינה יזומה מכבה את הספינר — וגם רק אם היא עדיין הטעינה היזומה האחרונה.
+      if (!background && seq === fgSeq.current) setLoading(false)
     }
   }
 
