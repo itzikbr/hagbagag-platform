@@ -9,6 +9,7 @@ import NewChat from './pages/NewChat'
 import NewGroup from './pages/NewGroup'
 import ExecutionSheetsList from './pages/ExecutionSheetsList'
 import NewExecutionSheet from './pages/NewExecutionSheet'
+import ExecutionSheetView from './pages/ExecutionSheetView'
 import Contacts from './pages/Contacts'
 import Admin from './pages/Admin'
 import ItzikDashboard from './pages/ItzikDashboard'
@@ -60,6 +61,7 @@ function PlatformLayout() {
           <Route path="/new-group" element={<NewGroup />} />
           <Route path="/sheets"     element={<ExecutionSheetsList />} />
           <Route path="/sheets/new" element={<NewExecutionSheet />} />
+          <Route path="/sheets/:id/view" element={<ExecutionSheetView />} />
           <Route path="/sheets/:id" element={<NewExecutionSheet />} />
           <Route path="/contacts"  element={<Contacts />} />
           <Route path="/admin"     element={<RequireManagerOrAdmin><Admin /></RequireManagerOrAdmin>} />

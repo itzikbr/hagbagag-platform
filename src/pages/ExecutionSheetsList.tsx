@@ -117,6 +117,21 @@ export default function ExecutionSheetsList() {
     }
   }
 
+  async function deleteSheet(sheet: SheetRow) {
+    if (!window.confirm(`למחוק את "${sheet.project_name}"? פעולה זו אינה הפיכה.`)) return
+    // מסירים מיד מהתצוגה (optimistic), ומחזירים אם המחיקה נכשלה
+    const prev = sheets
+    setSheets(cur => cur.filter(s => s.id !== sheet.id))
+    // מוחקים תחילה מבנים תלויים (FK) ואז את הדף
+    await supabase.from('buildings').delete().eq('sheet_id', sheet.id)
+    const { error } = await supabase.from('execution_sheets').delete().eq('id', sheet.id)
+    if (error) {
+      console.error('[sheets] delete failed:', error)
+      alert('מחיקה נכשלה. נסה שוב.')
+      setSheets(prev)
+    }
+  }
+
   const filtered = sheets.filter(s =>
     s.project_name.toLowerCase().includes(search.toLowerCase()) ||
     (s.order_number ?? '').toLowerCase().includes(search.toLowerCase()) ||
@@ -202,7 +217,13 @@ export default function ExecutionSheetsList() {
         )}
 
         {!loading && !error && filtered.map(sheet => (
-          <SheetItem key={sheet.id} sheet={sheet} onClick={() => navigate(`/sheets/${sheet.id}`)} />
+          <SheetItem
+            key={sheet.id}
+            sheet={sheet}
+            onClick={() => navigate(`/sheets/${sheet.id}`)}
+            onView={() => navigate(`/sheets/${sheet.id}/view`)}
+            onDelete={() => deleteSheet(sheet)}
+          />
         ))}
       </div>
 
@@ -277,7 +298,12 @@ function EmptyState({ hasSearch, onCreate }: { hasSearch: boolean; onCreate: () 
   )
 }
 
-function SheetItem({ sheet, onClick }: { sheet: SheetRow; onClick: () => void }) {
+const ACTION_W = 84   // רוחב כפתור הפעולה שנחשף
+const THRESHOLD = 60  // מרחק גרירה מינימלי כדי לחשוף פעולה
+
+function SheetItem({ sheet, onClick, onView, onDelete }: {
+  sheet: SheetRow; onClick: () => void; onView: () => void; onDelete: () => void
+}) {
   const status = STATUS_META[sheet.status ?? 'field'] ?? STATUS_META.field
   const subtitleParts = [
     sheet.order_number ? `הזמנה ${sheet.order_number}` : null,
@@ -285,13 +311,78 @@ function SheetItem({ sheet, onClick }: { sheet: SheetRow; onClick: () => void })
     sheet.num_buildings ? `${sheet.num_buildings} מבנים` : null,
   ].filter(Boolean)
 
+  // offset שלילי = החלקה שמאלה (חושף מחיקה בצד ימין); חיובי = החלקה ימינה (חושף צפייה בצד שמאל)
+  const [offset, setOffset] = useState(0)
+  const [dragging, setDragging] = useState(false)
+  const startX = useRef(0)
+  const startOffset = useRef(0)
+  const moved = useRef(false)
+
+  function onTouchStart(e: React.TouchEvent) {
+    startX.current = e.touches[0].clientX
+    startOffset.current = offset
+    moved.current = false
+    setDragging(true)
+  }
+  function onTouchMove(e: React.TouchEvent) {
+    const dx = e.touches[0].clientX - startX.current
+    if (Math.abs(dx) > 6) moved.current = true
+    let next = startOffset.current + dx
+    // מגבילים לטווח [-ACTION_W, +ACTION_W] עם התנגדות קלה מעבר לכך
+    if (next > ACTION_W) next = ACTION_W + (next - ACTION_W) * 0.3
+    if (next < -ACTION_W) next = -ACTION_W + (next + ACTION_W) * 0.3
+    setOffset(next)
+  }
+  function onTouchEnd() {
+    setDragging(false)
+    if (offset <= -THRESHOLD) setOffset(-ACTION_W)       // נעילה על חשיפת "מחק"
+    else if (offset >= THRESHOLD) setOffset(ACTION_W)    // נעילה על חשיפת "צפייה"
+    else setOffset(0)                                    // חזרה למקום
+  }
+  function handleClick() {
+    // אם השורה פתוחה או בוצעה גרירה — קליק סוגר במקום לנווט
+    if (offset !== 0) { setOffset(0); return }
+    if (moved.current) return
+    onClick()
+  }
+
+  const transition = dragging ? 'none' : 'transform 0.2s ease'
+
   return (
+    <div style={{ position: 'relative', overflow: 'hidden', borderBottom: '1px solid #F0F2F5', background: '#fff' }}>
+      {/* פעולת מחיקה — נחשפת בצד ימין בהחלקה שמאלה */}
+      <button
+        type="button"
+        onClick={onDelete}
+        style={{
+          position: 'absolute', top: 0, bottom: 0, right: 0, width: ACTION_W,
+          background: '#CC0000', color: '#fff', border: 'none',
+          fontSize: 15, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
+          display: offset < 0 ? 'flex' : 'none', alignItems: 'center', justifyContent: 'center',
+        }}
+      >מחק</button>
+      {/* פעולת צפייה — נחשפת בצד שמאל בהחלקה ימינה */}
+      <button
+        type="button"
+        onClick={() => { setOffset(0); onView() }}
+        style={{
+          position: 'absolute', top: 0, bottom: 0, left: 0, width: ACTION_W,
+          background: '#1A5FAD', color: '#fff', border: 'none',
+          fontSize: 15, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
+          display: offset > 0 ? 'flex' : 'none', alignItems: 'center', justifyContent: 'center',
+        }}
+      >צפייה</button>
+
     <div
-      onClick={onClick}
+      onClick={handleClick}
+      onTouchStart={onTouchStart}
+      onTouchMove={onTouchMove}
+      onTouchEnd={onTouchEnd}
       style={{
         display: 'flex', alignItems: 'center', padding: '12px 16px',
-        gap: 12, cursor: 'pointer', borderBottom: '1px solid #F0F2F5',
+        gap: 12, cursor: 'pointer',
         background: '#fff', userSelect: 'none',
+        transform: `translateX(${offset}px)`, transition, position: 'relative',
       }}
     >
       {/* Sheet icon */}
@@ -335,6 +426,7 @@ function SheetItem({ sheet, onClick }: { sheet: SheetRow; onClick: () => void })
           </span>
         </div>
       </div>
+    </div>
     </div>
   )
 }
