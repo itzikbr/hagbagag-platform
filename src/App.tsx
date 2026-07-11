@@ -53,7 +53,7 @@ function PlatformLayout() {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
       <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
         <Routes>
-          <Route path="/"          element={<Navigate to="/chats" replace />} />
+          <Route path="/"          element={<Navigate to="/sheets" replace />} />
           <Route path="/chats"     element={<ChatList />} />
           <Route path="/chat/:id"  element={<ChatConversation />} />
           <Route path="/new-chat"  element={<NewChat />} />
