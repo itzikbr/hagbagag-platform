@@ -28,6 +28,13 @@ const PANEL_OPTS = ['איסכורית', 'פנל מבודד', 'אחר']
 const ALUM_SHADES = ['חום', 'פולי סנדר', 'מהגוני', 'לבן', 'קרם', 'אפור', 'ירוק', 'אחר']
 const GUTTER_TYPES = ['חיצוני', 'פנימי', 'חיצוני ופנימי', 'אחר']
 
+// ── לשונית התקדמות ─────────────────────────────────────────────
+const PERMIT_SUPERVISORS = ['עמאד', 'סמיר', 'עלי', 'אסף', 'איציק']
+const ROOFING_SUPPLIERS = ['הגן הנדסה', 'אופק', 'פוליפח', 'א.ד פלדות', 'מבנה דרום', 'אחר']
+const ALL_SUPPLIERS = ['הגן הנדסה', 'אופק', 'פוליפח', 'א.ד פלדות', 'מבנה דרום', 'אחים שחם', 'כראדי', 'פסקל', 'מטלום', 'עץ ועצה', 'אלי לבן', 'נוימן', 'אחר']
+const TEAM_LEADS = ['עמאד', 'סמיר', 'עלי']
+const SUBCONTRACTORS = ['זכי', 'מאלק', 'חאזם', 'וויסאם', 'מחמוד', 'האני', 'גל', 'אחר']
+
 interface WorkTypeMeta { key: string; label: string }
 const WORK_TYPES: WorkTypeMeta[] = [
   { key: 'asbestos',    label: '🟠 הסרת אסבסט' },
@@ -109,6 +116,18 @@ interface MaterialsState { active: string[]; data: Record<string, MaterialCatego
 interface DocItem { path: string; url: string; name: string; note: string; noteOpen: boolean }
 interface Documentation { photos: DocItem[]; sketch: DocItem[]; documents: DocItem[] }
 
+interface AsbestosPermit { submission_date: string; approval_date: string; permit_number: string; supervisor: string }
+interface ProgressData {
+  asbestos_permit: AsbestosPermit
+  suppliers: string[]
+  materials_order_date: string
+  materials_arrival_date: string
+  execution_date: string
+  estimated_days: string
+  team_lead: string
+  subcontractor: string
+}
+
 interface SheetForm {
   details: DetailsTab
   general: GeneralProps
@@ -117,6 +136,7 @@ interface SheetForm {
   blocks: WorkBlocks
   materials: MaterialsState
   documentation: Documentation
+  progress: ProgressData
   notes: Record<string, string>
 }
 
@@ -133,6 +153,14 @@ function emptyBlocks(): WorkBlocks {
   }
 }
 function emptyCategory(): MaterialCategory { return { rows: [{ type: '', shade: '', qty: '', measure: '' }], thickness: '', color: '' } }
+function emptyProgress(): ProgressData {
+  return {
+    asbestos_permit: { submission_date: '', approval_date: '', permit_number: '', supervisor: '' },
+    suppliers: ['', '', ''],
+    materials_order_date: '', materials_arrival_date: '',
+    execution_date: '', estimated_days: '', team_lead: '', subcontractor: '',
+  }
+}
 function emptyForm(): SheetForm {
   return {
     details: { date: todayISO(), fillerName: '', customerName: '', address: '', phones: [''], solarPrep: false },
@@ -142,8 +170,14 @@ function emptyForm(): SheetForm {
     blocks: emptyBlocks(),
     materials: { active: ['flashing'], data: { flashing: emptyCategory() } },
     documentation: { photos: [], sketch: [], documents: [] },
+    progress: emptyProgress(),
     notes: {},
   }
+}
+function daysSince(iso: string): number {
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return 0
+  return Math.max(0, Math.floor((Date.now() - d.getTime()) / 86400000))
 }
 
 function num(s: string): number { const n = parseFloat(s); return isNaN(n) ? 0 : n }
@@ -229,13 +263,15 @@ function YesNoChip({ value, onChange }: { value: boolean; onChange: (v: boolean)
 
 // ── כרטיסייה עם כותרת + כפתור הערה ─────────────────────────────
 function Card({ id, title, tone = 'default', notes, setNotes, notesOpen, toggleNote, children }: {
-  id?: string; title: string; tone?: 'default' | 'orange' | 'red'
+  id?: string; title: string; tone?: 'default' | 'orange' | 'red' | 'blue' | 'green'
   notes?: Record<string, string>; setNotes?: (k: string, v: string) => void
   notesOpen?: Set<string>; toggleNote?: (k: string) => void
   children: React.ReactNode
 }) {
   const head = tone === 'orange' ? { bg: '#FFF5E6', color: '#D14900' }
     : tone === 'red' ? { bg: '#FFF0F0', color: '#CC0000' }
+    : tone === 'blue' ? { bg: '#EBF4FF', color: '#1A5FAD' }
+    : tone === 'green' ? { bg: '#E8F5E9', color: '#1A5A2A' }
     : { bg: '#F8F8F8', color: '#666' }
   const noteEnabled = !!(id && notes && setNotes && notesOpen && toggleNote)
   const open = noteEnabled && notesOpen!.has(id!)
@@ -500,10 +536,114 @@ function DocSection({ icon, title, subtitle, items, onAdd, onRemove, onNote, upl
   )
 }
 
+// ── לשונית התקדמות ─────────────────────────────────────────────
+function PSelect({ value, onChange, options, emptyLabel = '— בחר —', accent }: {
+  value: string; onChange: (v: string) => void; options: string[]; emptyLabel?: string; accent?: string
+}) {
+  return (
+    <select dir="rtl" value={value} onChange={e => onChange(e.target.value)}
+      style={{ ...inputStyle, color: value ? '#111' : '#555', appearance: 'none', cursor: 'pointer', ...(accent ? { borderColor: accent } : {}) }}>
+      <option value="">{emptyLabel}</option>
+      {options.map(o => <option key={o} value={o}>{o}</option>)}
+    </select>
+  )
+}
+
+function PermitStatus({ submission, approval }: { submission: string; approval: string }) {
+  let badge: { bg: string; color: string; text: string }
+  if (approval) badge = { bg: '#E8F5E9', color: '#1A5A2A', text: '✓ התקבל' }
+  else if (submission) badge = { bg: '#FFF0E0', color: '#B26A00', text: `⏳ ממתין · ${daysSince(submission)} ימים` }
+  else badge = { bg: '#EEE', color: '#777', text: 'טרם הוגש' }
+  return (
+    <div style={{ background: '#FFF8F0', borderRadius: 8, padding: '8px 10px', marginTop: 4, display: 'flex', justifyContent: 'center', direction: 'rtl' }}>
+      <span style={{ background: badge.bg, color: badge.color, borderRadius: 14, padding: '4px 12px', fontSize: 13, fontWeight: 800 }}>{badge.text}</span>
+    </div>
+  )
+}
+
+function SummaryLine({ icon, text, bg }: { icon: string; text: string; bg: string }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: bg, borderRadius: 8, padding: '9px 12px', direction: 'rtl' }}>
+      <span style={{ fontSize: 15 }}>{icon}</span>
+      <span style={{ fontSize: 13, fontWeight: 700, color: '#333' }}>{text}</span>
+    </div>
+  )
+}
+
+function ProgressTab({ progress, workTypes, onChange }: {
+  progress: ProgressData; workTypes: string[]; onChange: (p: Partial<ProgressData>) => void
+}) {
+  const p = progress
+  const setPermit = (patch: Partial<AsbestosPermit>) => onChange({ asbestos_permit: { ...p.asbestos_permit, ...patch } })
+  function setSupplier(i: number, val: string) {
+    const next = p.suppliers.map((s, j) => j === i ? val : s)
+    if (val && i === next.length - 1) next.push('', '', '')  // בחירה בתא האחרון → שורה חדשה
+    onChange({ suppliers: next })
+  }
+
+  const permitBlocker = workTypes.includes('asbestos') && !p.asbestos_permit.approval_date
+  const blockers: string[] = []
+  if (permitBlocker) blockers.push('אין היתר')
+  if (!p.execution_date) blockers.push('אין תאריך ביצוע')
+  const materialsOrdered = p.suppliers.some(s => s.trim() !== '') && !!p.materials_order_date
+  const teamAssigned = !!p.team_lead
+
+  return (
+    <>
+      {workTypes.includes('asbestos') && (
+        <Card title="היתר משרד הסביבה" tone="blue">
+          <div style={grid2}>
+            <Field label="תאריך הגשה"><TextInput type="date" value={p.asbestos_permit.submission_date} onChange={v => setPermit({ submission_date: v })} /></Field>
+            <Field label="היתר התקבל"><TextInput type="date" value={p.asbestos_permit.approval_date} onChange={v => setPermit({ approval_date: v })} /></Field>
+          </div>
+          <div style={grid2}>
+            <Field label="מפקח"><PSelect value={p.asbestos_permit.supervisor} options={PERMIT_SUPERVISORS} onChange={v => setPermit({ supervisor: v })} /></Field>
+            <Field label="מס׳ היתר"><TextInput value={p.asbestos_permit.permit_number} onChange={v => setPermit({ permit_number: v })} placeholder="מספר היתר" /></Field>
+          </div>
+          <PermitStatus submission={p.asbestos_permit.submission_date} approval={p.asbestos_permit.approval_date} />
+        </Card>
+      )}
+
+      <Card title="ספקים" tone="blue">
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 10 }}>
+          {p.suppliers.map((s, i) => (
+            <PSelect key={i} value={s} options={i % 3 === 0 ? ROOFING_SUPPLIERS : ALL_SUPPLIERS}
+              emptyLabel={i % 3 === 0 ? '— קירוי —' : '— ספק —'} onChange={v => setSupplier(i, v)} />
+          ))}
+        </div>
+        <div style={grid2}>
+          <Field label="תאריך הזמנה"><TextInput type="date" value={p.materials_order_date} onChange={v => onChange({ materials_order_date: v })} /></Field>
+          <Field label="הגעה לאתר"><TextInput type="date" value={p.materials_arrival_date} onChange={v => onChange({ materials_arrival_date: v })} /></Field>
+        </div>
+      </Card>
+
+      <Card title="תכנון ביצוע" tone="green">
+        <div style={grid2}>
+          <Field label="תאריך ביצוע"><TextInput type="date" value={p.execution_date} onChange={v => onChange({ execution_date: v })} /></Field>
+          <Field label="ימים משוערים"><TextInput type="number" value={p.estimated_days} onChange={v => onChange({ estimated_days: v })} placeholder="ימים" /></Field>
+        </div>
+        <div style={grid2}>
+          <Field label="ראש צוות"><PSelect value={p.team_lead} options={TEAM_LEADS} accent="#1A5A2A" onChange={v => onChange({ team_lead: v })} /></Field>
+          <Field label="קבלן משנה"><PSelect value={p.subcontractor} options={SUBCONTRACTORS} emptyLabel="— ללא —" accent="#1A5A2A" onChange={v => onChange({ subcontractor: v })} /></Field>
+        </div>
+      </Card>
+
+      <Card title="סיכום" tone="green">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, direction: 'rtl' }}>
+          {blockers.length > 0 && <SummaryLine icon="🟡" text={`חסמים פתוחים · ${blockers.join(' · ')}`} bg="#FFF8E6" />}
+          <SummaryLine icon={materialsOrdered ? '✅' : '⬜'} text="חומרים הוזמנו" bg={materialsOrdered ? '#E8F5E9' : '#F5F5F5'} />
+          <SummaryLine icon={teamAssigned ? '✅' : '⬜'} text="צוות שובץ" bg={teamAssigned ? '#E8F5E9' : '#F5F5F5'} />
+          {blockers.length === 0 && <SummaryLine icon="🟢" text="מוכן לביצוע" bg="#E8F5E9" />}
+        </div>
+      </Card>
+    </>
+  )
+}
+
 // ══════════════════════════════════════════════════════════════
 // הקומפוננטה הראשית
 // ══════════════════════════════════════════════════════════════
-type TabKey = 'details' | 'docs' | 'materials'
+type TabKey = 'details' | 'docs' | 'materials' | 'progress'
 
 export default function NewExecutionSheet() {
   const navigate = useNavigate()
@@ -530,6 +670,7 @@ export default function NewExecutionSheet() {
   const patchGeneral = (p: Partial<GeneralProps>) => setForm(f => ({ ...f, general: { ...f.general, ...p } }))
   const patchLogistics = (p: Partial<Logistics>) => setForm(f => ({ ...f, logistics: { ...f.logistics, ...p } }))
   const patchBlocks = (p: Partial<WorkBlocks>) => setForm(f => ({ ...f, blocks: { ...f.blocks, ...p } }))
+  const patchProgress = (p: Partial<ProgressData>) => setForm(f => ({ ...f, progress: { ...f.progress, ...p } }))
   const setNote = (k: string, v: string) => setForm(f => ({ ...f, notes: { ...f.notes, [k]: v } }))
   const toggleNote = (k: string) => setNotesOpen(prev => { const n = new Set(prev); n.has(k) ? n.delete(k) : n.add(k); return n })
 
@@ -568,6 +709,16 @@ export default function NewExecutionSheet() {
         blocks: { ...emptyBlocks(), ...(wc.blocks ?? {}) },
         materials: (b?.materials && (b.materials as MaterialsState).active) ? (b.materials as MaterialsState) : base.materials,
         documentation: { ...base.documentation, ...(wc.documentation ?? {}) },
+        progress: (() => {
+          const bp = emptyProgress()
+          const pd = (sheet?.progress_data ?? {}) as Partial<ProgressData> & { estimated_days?: number | string }
+          return {
+            ...bp, ...pd,
+            asbestos_permit: { ...bp.asbestos_permit, ...(pd.asbestos_permit ?? {}) },
+            suppliers: (pd.suppliers && pd.suppliers.length) ? pd.suppliers : bp.suppliers,
+            estimated_days: pd.estimated_days ? String(pd.estimated_days) : '',
+          }
+        })(),
         notes: wc.notes ?? {},
       }
       // חתימות URL מחדש לתמונות (bucket פרטי)
@@ -603,6 +754,16 @@ export default function NewExecutionSheet() {
       filled_by_name: f.details.fillerName || profile?.full_name || '',
       created_by: uid,
       status,
+      progress_data: {
+        asbestos_permit: f.progress.asbestos_permit,
+        suppliers: f.progress.suppliers,
+        materials_order_date: f.progress.materials_order_date,
+        materials_arrival_date: f.progress.materials_arrival_date,
+        execution_date: f.progress.execution_date,
+        estimated_days: num(f.progress.estimated_days),
+        team_lead: f.progress.team_lead,
+        subcontractor: f.progress.subcontractor,
+      },
       updated_at: new Date().toISOString(),
     }
 
@@ -768,11 +929,12 @@ export default function NewExecutionSheet() {
 
       {/* Tabs */}
       <div style={{ display: 'flex', background: BG, flexShrink: 0, borderBottom: `1px solid ${BORDER}` }}>
-        {([['details', 'פרטים'], ['docs', 'תיעוד'], ['materials', 'חומרים']] as [TabKey, string][]).map(([key, label]) => (
+        {([['details', 'פרטים'], ['docs', 'תיעוד'], ['materials', 'חומרים'], ['progress', '🚦 התקדמות']] as [TabKey, string][]).map(([key, label]) => (
           <button key={key} onClick={() => setTab(key)} style={{
             flex: 1, height: 26, border: 'none', background: 'none', cursor: 'pointer', fontFamily: 'inherit',
-            fontSize: 13, fontWeight: tab === key ? 800 : 500, color: tab === key ? RED : '#888',
+            fontSize: 12, fontWeight: tab === key ? 800 : 500, color: tab === key ? RED : '#888',
             borderBottom: tab === key ? `2px solid ${RED}` : '2px solid transparent',
+            whiteSpace: 'nowrap',
           }}>{label}</button>
         ))}
       </div>
@@ -895,6 +1057,11 @@ export default function NewExecutionSheet() {
               </div>
             )}
           </>
+        )}
+
+        {/* ══ לשונית התקדמות ══ */}
+        {tab === 'progress' && (
+          <ProgressTab progress={form.progress} workTypes={form.workTypes} onChange={patchProgress} />
         )}
       </div>
 
