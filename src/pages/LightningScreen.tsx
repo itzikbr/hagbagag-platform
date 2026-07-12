@@ -69,43 +69,36 @@ const FUTURE_BLOCKS: Block[] = [
   { id: 'pension',  icon: '💼', title: 'פנסיה',    badge: 'בקרוב', badgeColor: 'gray', items: [], isFuture: true },
 ]
 
-// ── הפרומפט שנשלח לקלוד ────────────────────────────────────
-const BRIEF_PROMPT = `אתה עוזר של איציק בריסקין. תפקידך עכשיו: לייצר snapshot מהיר של המצב הנוכחי.
+// ── הפרומפט שנשלח לקלוד (v2 — מהיר, קריאה ממוקדת בלבד) ──────
+const BRIEF_PROMPT = `אתה עוזר של איציק בריסקין. תפקידך: לייצר snapshot קצר ומדויק של המצב הנוכחי.
 
-קרא את המקורות הבאים ובנה תשובה בפורמט JSON בלבד (ללא טקסט נוסף):
+החזר JSON בלבד, ללא טקסט נוסף, בפורמט הזה בדיוק:
+{"lastUpdated":"HH:MM","digest":[{"icon":"...","text":"...","subText":"...","blockId":"...","urgency":"urgent|warning|info|muted"}],"blocks":[{"id":"...","icon":"...","title":"...","badge":"...","badgeColor":"red|orange|green|gray|blue","items":[{"title":"...","subTitle":"...","urgency":"urgent|warning|ok|muted","hasArrow":true}]}]}
 
-1. נוטיון — מסד גביה: שלוף חובות שתאריך פירעונם עבר או קרוב (עד 7 ימים)
-2. נוטיון — משימות פתוחות: שלוף משימות דחופות או שעבר דדליין שלהן
-3. Google Calendar — אירועים: אתמול (משמעותי?), היום, מחר
-4. Google Drive — סידור עבודה (fileId: 14UteHhz5ofMLqPGNU5i8dR-TSiDt0lEt): מי עובד היום
-5. Google Drive — אלכסנדרה (fileId: 1hGPxoQFFt5pO5aUu2Et6PMvEYZqHCzMi): תנועות גדולות השבוע
+מקורות לקרוא — בסדר הזה, כל אחד בקריאה אחת מהירה:
 
-כללי סינון:
-- גביה: העלה רק חובות שפגו + חובות שיפגו תוך 7 ימים. מיין לפי (סכום × ימים)
-- יומן: העלה כל אירוע שאם איציק יפספס — בעיה. אין מכסה.
-- שטח: שורת סיכום אחת בלבד
-- משימות: רק דחופות + עבר דדליין
-- תזרים: רק אם יש תנועה גדולה שאמורה לצאת ועוד לא יצאה
+1. Google Calendar — אירועי אתמול (משמעותי?), היום, מחר בלבד. אל תקרא יותר.
 
-החזר JSON בפורמט הזה בדיוק:
-{
-  "lastUpdated": "HH:MM",
-  "digest": [
-    {"icon": "💰", "text": "...", "subText": "...", "blockId": "gabiya", "urgency": "urgent"}
-  ],
-  "blocks": [
-    {
-      "id": "gabiya",
-      "icon": "💰",
-      "title": "גביה דחופה",
-      "badge": "3 ממתינים",
-      "badgeColor": "red",
-      "items": [
-        {"title": "...", "subTitle": "...", "urgency": "urgent", "hasArrow": true}
-      ]
-    }
-  ]
-}`
+2. נוטיון — מסד גביה: שלוף רק רשומות שתאריך הפירעון שלהן הוא עד 7 ימים קדימה או כבר עבר. מיין לפי דחיפות (ימים שעברו × סכום). מקסימום 5 רשומות.
+
+3. נוטיון — משימות: שלוף רק משימות עם סטטוס פתוח/בטיפול שתאריך היעד עבר או הוא היום. מקסימום 3 משימות.
+
+4. Google Drive — סידור עבודה (fileId: 14UteHhz5ofMLqPGNU5i8dR-TSiDt0lEt): קרא רק את הגיליון "סידור עבודה". חפש את השבוע של התאריך הנוכחי בלבד (שורות שהתאריך שלהן בין היום פחות יומיים להיום פלוס יומיים). אל תקרא שורות מ-2024 או מחודשים קודמים.
+
+כללי Layer 1 (digest) — מה להכניס:
+- גביה: חובות שפגו + חובות שיפגו תוך 7 ימים (לפי סכום × ימים)
+- יומן: כל אירוע שאם תפספס — בעיה. אין מכסה.
+- שטח: שורה אחת בלבד — מי עובד היום בקצרה
+- משימות: רק עבר הדדליין + דחוף במפורש
+
+בלוקים קבועים (blocks) — תמיד כלול את כולם:
+1. id: "gabiya", icon: "💰", title: "גביה דחופה"
+2. id: "yoman", icon: "📅", title: "יומן"
+3. id: "shetach", icon: "🔨", title: "שטח היום"
+4. id: "mishmot", icon: "✅", title: "משימות"
+5. id: "tizreem", icon: "📊", title: "תזרים", isFuture: true — badge: "בקרוב", badgeColor: "gray", items: []
+
+אם מקור לא זמין — המשך בלי להיתקע, רשום "לא זמין" בפריט.`
 
 // ── חילוץ JSON מתוך טקסט (claude עלול לעטוף בטקסט/```json) ──
 function extractJson(raw: string): BriefData | null {
@@ -158,11 +151,15 @@ export default function LightningScreen() {
   const fetchBrief = async () => {
     setLoading(true)
     setError(false)
+    // timeout של 120 שניות — הבריף אמור לחזור תוך ~60-90ש'
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 120000)
     try {
       // הקריאה עוברת דרך Caddy: /api/* → claude-server.js (:4000)
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
         body: JSON.stringify({
           message: BRIEF_PROMPT,
           noHistory: true,
@@ -171,6 +168,7 @@ export default function LightningScreen() {
         }),
       })
       const data = await response.json()
+      // חילוץ JSON גם אם יש טקסט לפני/אחרי (מאזן סוגריים, חסין יותר מ-regex)
       const parsed = extractJson(String(data.response ?? ''))
       if (!parsed) throw new Error('no-json')
       setBriefData(parsed)
@@ -179,6 +177,7 @@ export default function LightningScreen() {
     } catch {
       setError(true)
     } finally {
+      clearTimeout(timeoutId)
       setLoading(false)
     }
   }
@@ -274,7 +273,7 @@ export default function LightningScreen() {
         {loading && !briefData && !error && (
           <div style={{ background: CARD, borderRadius: 16, padding: 28, boxShadow: '0 1px 6px rgba(0,0,0,0.08)', textAlign: 'center' }}>
             <div style={{ width: 34, height: 34, margin: '0 auto 14px', border: '3px solid #eee', borderTopColor: RED, borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
-            <div style={{ fontSize: 15, color: '#555' }}>אוסף את התמונה מכל המקורות…</div>
+            <div style={{ fontSize: 15, color: '#555' }}>מרכז נתונים... (~60 שניות)</div>
           </div>
         )}
 
