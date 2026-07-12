@@ -17,12 +17,14 @@ interface BriefData {
   blocks: Block[]        // Layer 2
 }
 
+type Urgency = 'urgent' | 'warning' | 'info' | 'ok' | 'normal' | 'muted'
+
 interface DigestItem {
   icon: string
   text: string
   subText?: string
   blockId: string        // לניווט לבלוק
-  urgency: 'urgent' | 'warning' | 'info' | 'muted'
+  urgency: Urgency
 }
 
 interface Block {
@@ -38,7 +40,7 @@ interface Block {
 interface BlockItem {
   title: string
   subTitle?: string
-  urgency?: 'urgent' | 'warning' | 'ok' | 'muted'
+  urgency?: Urgency
   hasArrow?: boolean
 }
 
@@ -48,6 +50,7 @@ const URGENCY_COLOR: Record<string, string> = {
   warning: '#E8820C',   // כתום אזהרה
   info:    '#2563EB',   // כחול מידע
   ok:      '#16A34A',   // ירוק תקין
+  normal:  '#3F4A5A',   // כהה-נייטרלי (פריט רגיל)
   muted:   '#9AA0A6',   // אפור לא פעיל
 }
 
