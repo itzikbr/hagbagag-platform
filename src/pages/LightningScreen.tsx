@@ -143,14 +143,29 @@ function nowHHMM(): string {
 export default function LightningScreen() {
   const navigate = useNavigate()
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState(false)
+  const [error, setError] = useState(false)             // שגיאה מלאה — אין נתונים להציג
+  const [refreshError, setRefreshError] = useState(false) // רענון ברקע נכשל אך מציגים cache ישן
   const [briefData, setBriefData] = useState<BriefData | null>(null)
   const [openBlocks, setOpenBlocks] = useState<Record<string, boolean>>({})
   const blockRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
-  const fetchBrief = async () => {
+  // טעינה מיידית מה-cache בשרת (GET /api/brief-cache) — מוחזר {response, cachedAt} או {}
+  const loadCache = async (): Promise<BriefData | null> => {
+    try {
+      const r = await fetch('/api/brief-cache')
+      if (!r.ok) return null
+      const d = await r.json()
+      return extractJson(String(d.response ?? ''))
+    } catch {
+      return null
+    }
+  }
+
+  // hasFallback=true → כבר מוצג cache; כשל רענון לא יחליף למסך שגיאה אלא ישאיר את הישן
+  const fetchBrief = async (hasFallback: boolean) => {
     setLoading(true)
     setError(false)
+    setRefreshError(false)
     // timeout של 120 שניות — הבריף אמור לחזור תוך ~60-90ש'
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), 120000)
@@ -175,15 +190,26 @@ export default function LightningScreen() {
       // בלוקים נפתחים סגורים כברירת מחדל
       setOpenBlocks({})
     } catch {
-      setError(true)
+      if (hasFallback) setRefreshError(true)  // משאירים את ה-cache המוצג
+      else setError(true)
     } finally {
       clearTimeout(timeoutId)
       setLoading(false)
     }
   }
 
-  // רענון ראשוני בטעינת המסך
-  useEffect(() => { fetchBrief() }, [])
+  // בטעינת המסך: הצג מיד מה-cache אם קיים, ואז רענן ברקע.
+  // אם אין cache — fetchBrief מציג spinner כרגיל.
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      const cached = await loadCache()
+      if (cancelled) return
+      if (cached) setBriefData(cached)
+      fetchBrief(!!cached)
+    })()
+    return () => { cancelled = true }
+  }, [])
 
   // לחיצה על שורת digest → פותח את הבלוק וגולל אליו
   const goToBlock = (blockId: string) => {
@@ -221,9 +247,9 @@ export default function LightningScreen() {
             <span style={{ color: '#fff', fontWeight: 700, fontSize: 21 }}>⚡ שלום איציק</span>
           </div>
 
-          {/* כפתור רענן עגול */}
+          {/* כפתור רענן עגול — רענון ברקע, משאיר את ה-cache המוצג */}
           <button
-            onClick={fetchBrief}
+            onClick={() => fetchBrief(!!briefData)}
             disabled={loading}
             aria-label="רענן"
             style={{
@@ -243,13 +269,23 @@ export default function LightningScreen() {
           </button>
         </div>
         <div style={{ color: 'rgba(255,255,255,0.85)', fontSize: 13, marginTop: 6 }}>
-          {loading ? 'מרענן…' : `עודכן ${lastUpdated}`}
+          {loading ? (briefData ? 'מרענן ברקע…' : 'מרענן…') : `עודכן ${lastUpdated}`}
         </div>
         <style>{'@keyframes spin { to { transform: rotate(360deg); } }'}</style>
       </div>
 
       {/* ── Body ── */}
       <div style={{ flex: 1, overflowY: 'auto', background: BG, padding: 16 }} className="no-scrollbar">
+
+        {/* רענון ברקע נכשל — מציגים את ה-cache האחרון */}
+        {refreshError && briefData && !loading && (
+          <div style={{
+            background: '#FCEBD6', color: '#8A4B00', borderRadius: 12,
+            padding: '10px 14px', fontSize: 13.5, marginBottom: 12, textAlign: 'center',
+          }}>
+            הרענון לא הצליח — מציג את הנתונים האחרונים שנשמרו.
+          </div>
+        )}
 
         {/* מצב שגיאה */}
         {error && !loading && (
@@ -258,7 +294,7 @@ export default function LightningScreen() {
             <div style={{ fontWeight: 700, fontSize: 16, color: '#111', marginBottom: 6 }}>לא הצלחתי לרענן כרגע</div>
             <div style={{ fontSize: 14, color: '#666', marginBottom: 16 }}>נסה שוב בעוד רגע.</div>
             <button
-              onClick={fetchBrief}
+              onClick={() => fetchBrief(false)}
               style={{
                 background: RED, color: '#fff', border: 'none', borderRadius: 12,
                 padding: '11px 26px', fontSize: 15, fontWeight: 600, cursor: 'pointer',
