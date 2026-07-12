@@ -12,7 +12,7 @@ import NewExecutionSheet from './pages/NewExecutionSheet'
 import ExecutionSheetView from './pages/ExecutionSheetView'
 import Contacts from './pages/Contacts'
 import Admin from './pages/Admin'
-import ItzikDashboard from './pages/ItzikDashboard'
+import LightningScreen from './pages/LightningScreen'
 import BottomNav from './components/BottomNav'
 
 function Splash() {
@@ -65,7 +65,7 @@ function PlatformLayout() {
           <Route path="/sheets/:id" element={<NewExecutionSheet />} />
           <Route path="/contacts"  element={<Contacts />} />
           <Route path="/admin"     element={<RequireManagerOrAdmin><Admin /></RequireManagerOrAdmin>} />
-          <Route path="/itzik"     element={<RequireManagerOrAdmin><ItzikDashboard /></RequireManagerOrAdmin>} />
+          <Route path="/itzik"     element={<RequireManagerOrAdmin><LightningScreen /></RequireManagerOrAdmin>} />
           <Route path="*"          element={<Navigate to="/chats" replace />} />
         </Routes>
       </div>
