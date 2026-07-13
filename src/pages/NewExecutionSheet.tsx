@@ -858,6 +858,8 @@ export default function NewExecutionSheet() {
   useEffect(() => {
     if (!editId) return
     let cancelled = false
+    // רשת תקועה או שגיאה לא-צפויה לא ישאירו את הספינר תלוי לנצח — כיבוי fallback אחרי 8ש׳
+    const loadTimeout = setTimeout(() => { if (!cancelled) setLoading(false) }, 8000)
     ;(async () => {
       const { data: sheet } = await supabase.from('execution_sheets').select('*').eq('id', editId).single()
       if (cancelled) return
@@ -900,8 +902,11 @@ export default function NewExecutionSheet() {
         }
       }
       if (!cancelled) { setForm(merged); setLoading(false) }
-    })()
-    return () => { cancelled = true }
+    })().catch(e => {
+      console.error('[sheet] טעינת הדף נכשלה:', e)
+      if (!cancelled) setLoading(false)
+    })
+    return () => { cancelled = true; clearTimeout(loadTimeout) }
   }, [editId])
 
   // ── שמירה ל-Supabase ──────────────────────────────────────────
