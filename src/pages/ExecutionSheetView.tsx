@@ -35,13 +35,13 @@ const CATEGORY_UNIT: Record<string, string> = {
 
 // ── טיפוסים רופפים לקריאה בלבד ─────────────────────────────────
 interface DocItem { path?: string; url?: string; name?: string; note?: string }
-interface MaterialRow { type?: string; typeOther?: string; shade?: string; qty?: string; measure?: string; catalog_number?: string }
+interface MaterialRow { type?: string; typeOther?: string; shade?: string; qty?: string; measure?: string; catalog_number?: string; riderType?: string; riderAngle?: string }
 interface MaterialCategory {
   rows?: MaterialRow[]; roofingType?: string; sheetThickness?: string; roofColor?: string
   topThickness?: string; bottomThickness?: string; fillType?: string; tileType?: string
 }
 interface Blocks {
-  asbestos?: Record<string, string>
+  asbestos?: Record<string, string> & { foamed?: boolean }
   roofReplace?: Record<string, string>
   aluminum?: { shade?: string; meters?: string; coating?: string[] }
   gutters?: Record<string, string>
@@ -264,6 +264,8 @@ export default function ExecutionSheetView() {
                 <Row label="קונסטרוקציה" value={pick(a.ceilingConstruction, 'asb.construction')} />
                 <Row label="תקרה קשיחה" value={pick(a.ceiling, 'asb.ceiling')} />
                 <Row label="מקל סבא" value={a.grandpaStick} />
+                <Row label="סוג אסבסט" value={pick(a.asbestosType, 'asb.type')} />
+                <Row label="מוקצף" value={a.foamed ? 'כן' : 'לא'} />
               </Grid>
               <Row label="מבנים רגישים" value={a.sensitive} />
             </Section>
@@ -318,7 +320,10 @@ export default function ExecutionSheetView() {
               )}
               {rows.map((r, i) => {
                 const typeLabel = r.type === 'אחר' && has(r.typeOther) ? r.typeOther : r.type
-                const parts = [typeLabel, r.shade].filter(has).join(' · ')
+                const riderBits = r.type === 'רוכב'
+                  ? [r.riderType, has(r.riderAngle) ? `זווית ${r.riderAngle}` : '']
+                  : []
+                const parts = [typeLabel, ...riderBits, r.shade].filter(has).join(' · ')
                 const calc = num(r.qty) * num(r.measure)
                 const qtyText = has(r.qty) || has(r.measure) ? `${r.qty || 0} × ${r.measure || 0} = ${calc || 0} ${unit}` : ''
                 return <Row key={i} label={parts || `פריט ${i + 1}`} value={qtyText || '—'} />

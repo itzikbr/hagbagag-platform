@@ -47,6 +47,8 @@ const WOOD_MAT_OPTS      = ['לטות', '5×5', '5×10', '5×15', 'אחר']
 const MAT_TYPE_OPTS: Record<string, string[]> = {
   flashing: FLASHING_MAT_OPTS, gutters: GUTTER_MAT_OPTS, aluminum: ALUM_MAT_OPTS, wood: WOOD_MAT_OPTS,
 }
+const RIDER_TYPE_OPTS   = ['שטוח', 'טרפזי']          // "רוכב" בפחחות → סוג רוכב
+const ASBESTOS_TYPE_OPTS = ['גלי', 'לוחות', 'קנלטות', 'אחר']
 
 // ── לשונית התקדמות ─────────────────────────────────────────────
 const PERMIT_SUPERVISORS = ['עמאד', 'סמיר', 'עלי', 'אסף', 'איציק']
@@ -109,6 +111,7 @@ interface AsbestosBlock {
   coordX: string; coordY: string; usedFor: string
   ceiling: string; ceilingConstruction: string
   grandpaStick: string; sensitive: string
+  asbestosType: string; foamed: boolean          // סוג אסבסט + מוקצף
 }
 interface RoofReplaceBlock {
   existingRoof: string; newRoof: string
@@ -135,7 +138,7 @@ interface WorkBlocks {
   insulation: InsulationBlock
   other: OtherBlock
 }
-interface MaterialRow { type: string; typeOther: string; shade: string; qty: string; measure: string; catalog_number: string }
+interface MaterialRow { type: string; typeOther: string; shade: string; qty: string; measure: string; catalog_number: string; riderType: string; riderAngle: string }
 interface MaterialCategory {
   rows: MaterialRow[]; thickness: string; color: string
   // כותרת קירוי (roofing) — "סוג" יחיד לכל הסקשן + שדות תלויי-סוג
@@ -175,7 +178,7 @@ interface SheetForm {
 function todayISO(): string { return new Date().toISOString().slice(0, 10) }
 function emptyBlocks(): WorkBlocks {
   return {
-    asbestos:    { coordX: '', coordY: '', usedFor: '', ceiling: '', ceilingConstruction: '', grandpaStick: '', sensitive: '' },
+    asbestos:    { coordX: '', coordY: '', usedFor: '', ceiling: '', ceilingConstruction: '', grandpaStick: '', sensitive: '', asbestosType: '', foamed: false },
     roofReplace: { existingRoof: '', newRoof: '', construction: '', slope: '', overhang: '', overhangNote: '', sheetThickness: '', color: '', topThickness: '', bottomThickness: '', fillType: '', tileType: '' },
     aluminum:    { shade: '', meters: '', coating: [] },
     gutters:     { type: '', guttersM: '', guttersSegments: '', downUnits: '', downSegments: '' },
@@ -183,7 +186,7 @@ function emptyBlocks(): WorkBlocks {
     other:       { note: '' },
   }
 }
-function emptyRow(): MaterialRow { return { type: '', typeOther: '', shade: '', qty: '', measure: '', catalog_number: '' } }
+function emptyRow(): MaterialRow { return { type: '', typeOther: '', shade: '', qty: '', measure: '', catalog_number: '', riderType: '', riderAngle: '' } }
 function emptyCategory(): MaterialCategory {
   return {
     rows: [emptyRow()], thickness: '', color: '',
@@ -416,6 +419,10 @@ function WorkBlock({ typeKey, blocks, patch, others, setOther }: {
           <Field label="תקרה קשיחה"><SelectOther value={b.ceiling} onChange={v => set({ ceiling: v })} options={CEILING_OPTS} okey="asb.ceiling" {...oProps} /></Field>
           <Field label="מקל סבא"><SelectBox value={b.grandpaStick} onChange={v => set({ grandpaStick: v })} options={GRANDPA_OPTS} /></Field>
         </div>
+        <div style={grid2}>
+          <Field label="סוג אסבסט"><SelectOther value={b.asbestosType} onChange={v => set({ asbestosType: v })} options={ASBESTOS_TYPE_OPTS} okey="asb.type" {...oProps} /></Field>
+          <Field label="מוקצף"><YesNoChip value={!!b.foamed} onChange={v => set({ foamed: v })} /></Field>
+        </div>
         <Field label="מבנים רגישים"><AutoTextArea value={b.sensitive} onChange={v => set({ sensitive: v })} placeholder="מבנים רגישים בסביבה" /></Field>
       </>
     )
@@ -583,6 +590,17 @@ function MaterialCategoryCard({ catKey, cat, onChange, onRemove, others, setOthe
                 {r.type === 'אחר' && (
                   <input dir="rtl" maxLength={otherLen} value={r.typeOther} placeholder="פירוט…"
                     onChange={e => setRow(i, { typeOther: e.target.value })} style={{ ...inputStyle, marginTop: 6 }} />
+                )}
+                {r.type === 'רוכב' && (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 6 }}>
+                    <select dir="rtl" value={r.riderType} onChange={e => setRow(i, { riderType: e.target.value })}
+                      style={{ ...inputStyle, color: r.riderType ? '#111' : '#555', appearance: 'none', cursor: 'pointer' }}>
+                      <option value="" disabled hidden>סוג רוכב</option>
+                      {RIDER_TYPE_OPTS.map(o => <option key={o} value={o}>{o}</option>)}
+                    </select>
+                    <input dir="rtl" maxLength={15} value={r.riderAngle} placeholder="זווית"
+                      onChange={e => setRow(i, { riderAngle: e.target.value })} style={inputStyle} />
+                  </div>
                 )}
               </div>
             )}

@@ -124,9 +124,16 @@ export default function ExecutionSheetsList() {
     setSheets(cur => cur.filter(s => s.id !== sheet.id))
     // מוחקים תחילה מבנים תלויים (FK) ואז את הדף
     await supabase.from('buildings').delete().eq('sheet_id', sheet.id)
-    const { error } = await supabase.from('execution_sheets').delete().eq('id', sheet.id)
-    if (error) {
-      console.error('[sheets] delete failed:', error)
+    // .select() מחזיר את השורות שנמחקו בפועל. חשוב: אם RLS חוסם מחיקה,
+    // supabase מחזיר error=null אבל 0 שורות — לכן בודקים גם שהשורה אכן נמחקה,
+    // אחרת "מחיקה" מדומה תיראה כהצלחה והדף יחזור אחרי רענון.
+    const { data, error } = await supabase
+      .from('execution_sheets')
+      .delete()
+      .eq('id', sheet.id)
+      .select('id')
+    if (error || !data || data.length === 0) {
+      console.error('[sheets] delete failed:', error ?? 'no rows deleted (RLS?)')
       alert('מחיקה נכשלה. נסה שוב.')
       setSheets(prev)
     }
