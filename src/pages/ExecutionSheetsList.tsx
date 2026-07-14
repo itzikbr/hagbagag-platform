@@ -61,7 +61,23 @@ export default function ExecutionSheetsList() {
       })
       .subscribe()
 
-    return () => { clearTimeout(raceTimer); supabase.removeChannel(channel) }
+    // רענון בכל חזרה למסך: כשה-PWA/טאב חוזר לחזית או מ-bfcache, הרכיב לא בהכרח
+    // עובר mount מחדש (ואז ה-fetch של ה-mount לא רץ) — האזנה ל-visibility/focus/
+    // pageshow מבטיחה fetch טרי בכל פעם שהמשתמש חוזר לרשימה. רענון רקע (בלי ספינר).
+    const refreshOnReturn = () => {
+      if (document.visibilityState === 'visible') loadSheets({ background: true })
+    }
+    document.addEventListener('visibilitychange', refreshOnReturn)
+    window.addEventListener('focus', refreshOnReturn)
+    window.addEventListener('pageshow', refreshOnReturn)
+
+    return () => {
+      clearTimeout(raceTimer)
+      supabase.removeChannel(channel)
+      document.removeEventListener('visibilitychange', refreshOnReturn)
+      window.removeEventListener('focus', refreshOnReturn)
+      window.removeEventListener('pageshow', refreshOnReturn)
+    }
   }, [])
 
   // background=true → רענון שקט: לא מדליק את מסך הטעינה ולא מציג שגיאה על נתונים קיימים.
