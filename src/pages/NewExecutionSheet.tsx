@@ -14,7 +14,7 @@ const BORDER = '#E5E0DB'
 const AUTOSAVE_MS = 2000
 
 // ── רשימות בחירה ───────────────────────────────────────────────
-const FILLERS = ['עמאד', 'סמיר', 'עלי', 'אסף', 'דליה', 'מוטי', 'איציק']
+const FILLERS = ['עמאד', 'סמיר', 'עלי', 'אסף', 'דליה', 'מוטי', 'איציק', 'קלוד']
 const ROOF_TYPES = ['חד שיפועי', 'דו שיפועי', 'רב שיפועי', 'אחר']
 const CONSTRUCTIONS = ['עץ', 'מתכת', 'אחר']
 const GENERAL_CHIPS = ['דוד שמש', 'קולטים', 'פאנלים סולריים', 'מזגנים', 'ארובה', 'פטרית איזור', 'חלון תאורה', 'אנטנות', 'אחר']
@@ -337,13 +337,13 @@ function TextInput({ value, onChange, placeholder, type = 'text', maxLength }: {
     inputMode={type === 'number' ? 'decimal' : undefined}
     onChange={e => onChange(e.target.value)} />
 }
-function SelectBox({ value, onChange, options, placeholder = 'בחר' }: {
+function SelectBox({ value, onChange, options, placeholder = '— בחר —' }: {
   value: string; onChange: (v: string) => void; options: string[]; placeholder?: string
 }) {
   return (
     <select dir="rtl" value={value} onChange={e => onChange(e.target.value)}
       style={{ ...inputStyle, color: value ? '#111' : '#555', appearance: 'none', cursor: 'pointer' }}>
-      <option value="" disabled hidden>{placeholder}</option>
+      <option value="">{placeholder}</option>
       {options.map(o => <option key={o} value={o}>{o}</option>)}
     </select>
   )
@@ -358,7 +358,7 @@ function OtherText({ okey, others, setOther, maxLen = 20 }: {
   )
 }
 // dropdown שמראה אוטומטית שדה טקסט קצר כשנבחר "אחר" — הדפוס הגלובלי בטופס
-function SelectOther({ value, onChange, options, okey, others, setOther, placeholder = 'בחר', maxLen = 20 }: {
+function SelectOther({ value, onChange, options, okey, others, setOther, placeholder = '— בחר —', maxLen = 20 }: {
   value: string; onChange: (v: string) => void; options: string[]
   okey: string; others: Record<string, string>; setOther: (k: string, v: string) => void
   placeholder?: string; maxLen?: number
