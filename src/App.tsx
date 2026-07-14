@@ -1,6 +1,6 @@
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { useEffect, useState } from 'react'
-import { useAuth } from './hooks/useAuth'
+import { useAuth, useIsAdmin } from './hooks/useAuth'
 import Login from './pages/Login'
 import IosInstallBanner from './components/IosInstallBanner'
 import ChatList from './pages/ChatList'
@@ -34,17 +34,22 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
   return <>{children}</>
 }
 
-function RequireManagerOrAdmin({ children }: { children: React.ReactNode }) {
-  const { profile, initialized } = useAuth()
-  if (!initialized || !profile) return <Splash />
-  if (profile.role !== 'manager' && profile.role !== 'admin') return <Navigate to="/chats" replace />
+// גישת אדמין נקבעת לפי האימייל של המשתמש המחובר. מי שאינו אדמין
+// מנותב חזרה לדפי הביצוע — המסך היחיד שפתוח בפניו.
+function RequireAdmin({ children }: { children: React.ReactNode }) {
+  const { initialized } = useAuth()
+  const isAdmin = useIsAdmin()
+  if (!initialized) return <Splash />
+  if (!isAdmin) return <Navigate to="/sheets" replace />
   return <>{children}</>
 }
 
 function PlatformLayout() {
   const [activeTab, setActiveTab] = useState<'chats' | 'sheets' | 'more'>('chats')
   const location = useLocation()
-  const hideNav = location.pathname.startsWith('/chat/') ||
+  const isAdmin = useIsAdmin()
+  const hideNav = !isAdmin ||   // משתמש שאינו אדמין רואה רק דפי ביצוע — בלי ניווט תחתון
+                  location.pathname.startsWith('/chat/') ||
                   location.pathname === '/new-chat' ||
                   location.pathname === '/new-group' ||
                   location.pathname === '/contacts' ||
@@ -55,18 +60,20 @@ function PlatformLayout() {
       <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
         <Routes>
           <Route path="/"          element={<Navigate to="/sheets" replace />} />
-          <Route path="/chats"     element={<ChatList />} />
-          <Route path="/chat/:id"  element={<ChatConversation />} />
-          <Route path="/new-chat"  element={<NewChat />} />
-          <Route path="/new-group" element={<NewGroup />} />
+          {/* דפי ביצוע — פתוח לכל משתמש מחובר */}
           <Route path="/sheets"     element={<ExecutionSheetsList />} />
           <Route path="/sheets/new" element={<NewExecutionSheet />} />
           <Route path="/sheets/:id/view" element={<ExecutionSheetView />} />
           <Route path="/sheets/:id" element={<NewExecutionSheet />} />
-          <Route path="/contacts"  element={<Contacts />} />
-          <Route path="/admin"     element={<RequireManagerOrAdmin><Admin /></RequireManagerOrAdmin>} />
-          <Route path="/itzik"     element={<RequireManagerOrAdmin><LightningScreen /></RequireManagerOrAdmin>} />
-          <Route path="*"          element={<Navigate to="/chats" replace />} />
+          {/* כל שאר המסכים — אדמין בלבד */}
+          <Route path="/chats"     element={<RequireAdmin><ChatList /></RequireAdmin>} />
+          <Route path="/chat/:id"  element={<RequireAdmin><ChatConversation /></RequireAdmin>} />
+          <Route path="/new-chat"  element={<RequireAdmin><NewChat /></RequireAdmin>} />
+          <Route path="/new-group" element={<RequireAdmin><NewGroup /></RequireAdmin>} />
+          <Route path="/contacts"  element={<RequireAdmin><Contacts /></RequireAdmin>} />
+          <Route path="/admin"     element={<RequireAdmin><Admin /></RequireAdmin>} />
+          <Route path="/itzik"     element={<RequireAdmin><LightningScreen /></RequireAdmin>} />
+          <Route path="*"          element={<Navigate to="/sheets" replace />} />
         </Routes>
       </div>
       {!hideNav && <BottomNav activeTab={activeTab} onTabChange={setActiveTab} />}

@@ -24,12 +24,8 @@ const LIFT_OPTS = ['לא נדרש', 'דיזל', 'חשמלית']
 const ARM_OPTS = ['לא נדרש', 'מספריים', 'זרוע']
 const ACCESS_OPTS = ['קלה', 'מוגבלת', 'קשה', 'ללא גישה']
 const LOGISTICS_CHIPS = ['פנויה', 'עצים', 'חשמל', 'דרך צרה', 'אחר']
-const CEILING_OPTS = ['יש', 'בטון', 'רביץ', 'צפה', 'אחר', 'אין']
-const CEILING_TYPE_OPTS = ['בטון', 'רביץ', 'צפה', 'גבס', 'אחר']
 const ALUM_SHADES = ['חום', 'פולי סנדר', 'מהגוני', 'לבן', 'קרם', 'אפור', 'ירוק', 'אחר']
 const GUTTER_TYPES = ['חיצוני', 'פנימי', 'חיצוני ופנימי', 'אחר']
-const USED_FOR_OPTS = ['מגורים', 'סככה פתוחה', 'סככה סגורה', 'מחסן', 'מבנה ציבורי', 'תעשייה', 'אחר']
-const GRANDPA_OPTS = ['אין', 'יש']
 const ROOF_HEIGHT_OPTS = ['נמוך עד 3מ׳', 'בינוני 3-6מ׳', 'גבוה 6מ׳+']
 const EXISTING_ROOF_OPTS = ['איסכורית', 'אסבסט', 'רעפים', 'פנלים', 'שינגלס', 'אחר']
 const NEW_ROOF_OPTS = ['איסכורית', 'פנל מבודד', 'רעפים', 'שינגלס', 'אחר']
@@ -50,7 +46,18 @@ const MAT_TYPE_OPTS: Record<string, string[]> = {
   flashing: FLASHING_MAT_OPTS, gutters: GUTTER_MAT_OPTS, aluminum: ALUM_MAT_OPTS, wood: WOOD_MAT_OPTS,
 }
 const RIDER_TYPE_OPTS   = ['שטוח', 'טרפזי']          // "רוכב" בפחחות → סוג רוכב
-const ASBESTOS_TYPE_OPTS = ['גלי', 'לוחות', 'קנלטות', 'אחר']
+
+// ── החלפת אסבסט (בלוק רב-מבנים) ────────────────────────────────
+const ASB_RED = '#c0392b'
+const ASB_STRUCTURE_OPTS    = ['סככה פתוחה', 'סככה סגורה', 'מגורים', 'מחסן', 'אחר']
+const ASB_CONSTRUCTION_OPTS = ['בטון', 'מתכת', 'עץ', 'אחר']
+const ASB_CEILING_TYPE_OPTS = ['בטון', 'רביץ', 'גבס', 'צפה', 'אחר']
+const ASB_SUB_OPTS          = ['קנלטות', 'מוקצף', 'אחר']
+const ASB_CONS_STATE_OPTS   = ['תקינה', 'חלשה']
+const ASB_YESNO             = ['אין', 'יש']
+const ASB_INFRA_OPTS        = ['קיימת', 'חדשה']
+const ASB_KIND_OPTS         = ['רגיל', 'אחר']
+const ASB_NEWROOF_OPTS      = ['ללא', 'איסכורית', 'פנל מבודד', 'אחר']
 
 // ── לשונית התקדמות ─────────────────────────────────────────────
 const PERMIT_SUPERVISORS = ['עמאד', 'סמיר', 'עלי', 'אסף', 'איציק']
@@ -61,7 +68,7 @@ const SUBCONTRACTORS = ['זכי', 'מאלק', 'חאזם', 'וויסאם', 'מח�
 
 interface WorkTypeMeta { key: string; label: string }
 const WORK_TYPES: WorkTypeMeta[] = [
-  { key: 'asbestos',    label: '🟠 הסרת אסבסט' },
+  { key: 'asbestos',    label: '🟠 החלפת אסבסט' },
   { key: 'roofReplace', label: '🏠 החלפת גג' },
   { key: 'aluminum',    label: '🔩 ציפוי אלומיניום' },
   { key: 'gutters',     label: '🌧️ מרזבים' },
@@ -110,11 +117,27 @@ interface Logistics {
   workHeight: string
   chips: string[]
 }
+// כרטיס מבנה בודד בבלוק החלפת אסבסט (buildings[] מאוחסן ב-work_content jsonb)
+interface AsbestosBuilding {
+  coordX: string; coordY: string
+  roofSize: string                                     // גודל גג (מ"ר)
+  structureType: string; structureTypeOther: string    // סוג מבנה
+  construction: string; constructionOther: string      // קונסטרוקציה
+  height: string                                       // גובה (מ')
+  grandpaStick: string                                 // מקל סבא: אין/יש
+  consState: string                                    // מצב קונס': תקינה/חלשה
+  ceiling: string                                      // תקרה קשיחה: אין/יש
+  ceilingType: string; ceilingTypeOther: string        // סוג תקרה (רק כש-יש)
+  infra: string                                        // תשתית: קיימת/חדשה
+  asbestosKind: string                                 // סוג אסבסט: רגיל/אחר
+  asbestosSub: string; asbestosSubOther: string        // סוג (רק כש-אחר)
+  newRoof: string; newRoofNote: string                 // קירוי חדש + פירוט
+  note: string; noteOpen: boolean                      // הערה למבנה
+}
 interface AsbestosBlock {
-  coordX: string; coordY: string; usedFor: string
-  ceiling: string; ceilingType: string; ceilingConstruction: string
-  grandpaStick: string; sensitive: string
-  asbestosType: string; foamed: boolean          // סוג אסבסט + מוקצף
+  buildings: AsbestosBuilding[]
+  generalNote: string; generalNoteOpen: boolean        // הערה כללית לפרויקט
+  sensitive: string; sensitiveOpen: boolean            // מבנים רגישים
 }
 interface RoofReplaceBlock {
   existingRoof: string; newRoof: string
@@ -179,9 +202,51 @@ interface SheetForm {
 
 // ── ברירות מחדל ────────────────────────────────────────────────
 function todayISO(): string { return new Date().toISOString().slice(0, 10) }
+function emptyAsbBuilding(): AsbestosBuilding {
+  return {
+    coordX: '', coordY: '', roofSize: '', structureType: '', structureTypeOther: '',
+    construction: '', constructionOther: '', height: '', grandpaStick: '', consState: '',
+    ceiling: '', ceilingType: '', ceilingTypeOther: '', infra: '', asbestosKind: '', asbestosSub: '', asbestosSubOther: '',
+    newRoof: '', newRoofNote: '', note: '', noteOpen: false,
+  }
+}
+function emptyAsbestos(): AsbestosBlock {
+  return { buildings: [emptyAsbBuilding()], generalNote: '', generalNoteOpen: false, sensitive: '', sensitiveOpen: false }
+}
+// המרת נתוני אסבסט מ-DB לצורת הבלוק הרב-מבנים (כולל הגירת מבנה ישן בעל שדה בודד)
+function normalizeAsbestos(raw: unknown): AsbestosBlock {
+  if (!raw || typeof raw !== 'object') return emptyAsbestos()
+  const r = raw as Record<string, unknown>
+  if (Array.isArray(r.buildings)) {
+    const buildings = (r.buildings as unknown[]).map(b => ({ ...emptyAsbBuilding(), ...(b as object), noteOpen: !!(b as AsbestosBuilding).note }))
+    return {
+      buildings: buildings.length ? buildings : [emptyAsbBuilding()],
+      generalNote: String(r.generalNote ?? ''), generalNoteOpen: !!r.generalNote,
+      sensitive: String(r.sensitive ?? ''), sensitiveOpen: !!r.sensitive,
+    }
+  }
+  // מבנה ישן (הסרת אסבסט — שדות בודדים) → כרטיס מבנה אחד, best-effort
+  const has = (v: unknown) => v != null && String(v).trim() !== ''
+  if (!has(r.coordX) && !has(r.coordY) && !has(r.usedFor) && !has(r.ceiling) && !has(r.ceilingConstruction) && !has(r.asbestosType)) {
+    return { ...emptyAsbestos(), sensitive: String(r.sensitive ?? ''), sensitiveOpen: !!r.sensitive }
+  }
+  const b = emptyAsbBuilding()
+  b.coordX = String(r.coordX ?? ''); b.coordY = String(r.coordY ?? '')
+  const usedFor = String(r.usedFor ?? '')
+  if (ASB_STRUCTURE_OPTS.includes(usedFor)) b.structureType = usedFor
+  else if (usedFor) { b.structureType = 'אחר'; b.structureTypeOther = usedFor }
+  const cons = String(r.ceilingConstruction ?? '')
+  if (ASB_CONSTRUCTION_OPTS.includes(cons)) b.construction = cons
+  else if (cons) { b.construction = 'אחר'; b.constructionOther = cons }
+  b.grandpaStick = ASB_YESNO.includes(String(r.grandpaStick)) ? String(r.grandpaStick) : ''
+  const ceil = String(r.ceiling ?? '')
+  if (ceil === 'אין') b.ceiling = 'אין'
+  else if (ceil) { b.ceiling = 'יש'; b.ceilingType = ASB_CEILING_TYPE_OPTS.includes(ceil) ? ceil : (ASB_CEILING_TYPE_OPTS.includes(String(r.ceilingType)) ? String(r.ceilingType) : '') }
+  return { buildings: [b], generalNote: '', generalNoteOpen: false, sensitive: String(r.sensitive ?? ''), sensitiveOpen: !!r.sensitive }
+}
 function emptyBlocks(): WorkBlocks {
   return {
-    asbestos:    { coordX: '', coordY: '', usedFor: '', ceiling: '', ceilingType: '', ceilingConstruction: '', grandpaStick: '', sensitive: '', asbestosType: '', foamed: false },
+    asbestos:    emptyAsbestos(),
     roofReplace: { existingRoof: '', newRoof: '', construction: '', slope: '', overhang: '', overhangNote: '', sheetThickness: '', color: '', topThickness: '', bottomThickness: '', fillType: '', tileType: '' },
     aluminum:    { shade: '', meters: '', coating: [] },
     gutters:     { type: '', guttersM: '', guttersSegments: '', downUnits: '', downSegments: '' },
@@ -399,6 +464,157 @@ function Card({ id, title, tone = 'default', notes, setNotes, notesOpen, toggleN
   )
 }
 
+// ── פקדים קומפקטיים לבלוק החלפת אסבסט ─────────────────────────
+const miniLabel: React.CSSProperties = { fontSize: 10, fontWeight: 700, color: '#777', marginBottom: 3, direction: 'rtl' }
+const asbNoteBtn: React.CSSProperties = {
+  border: `1px solid ${ASB_RED}`, background: '#fff', color: ASB_RED, borderRadius: 13,
+  padding: '3px 9px', fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap',
+}
+const asbRemoveBtn: React.CSSProperties = {
+  width: 22, height: 22, flexShrink: 0, borderRadius: '50%', border: `1px solid ${ASB_RED}`,
+  background: '#fff', color: ASB_RED, cursor: 'pointer', fontSize: 12, lineHeight: 1, fontFamily: 'inherit',
+  display: 'flex', alignItems: 'center', justifyContent: 'center',
+}
+function MiniChip({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} style={{
+      padding: '3px 9px', borderRadius: 13, fontSize: 11, fontWeight: 700, cursor: 'pointer',
+      fontFamily: 'inherit', direction: 'rtl', whiteSpace: 'nowrap',
+      border: active ? `1px solid ${ASB_RED}` : `1px solid ${BORDER}`,
+      background: active ? '#FBECEA' : '#fff', color: active ? ASB_RED : '#555',
+    }}>{label}</button>
+  )
+}
+// עמודה של צ'יפים בבחירה יחידה (לחיצה חוזרת מבטלת)
+function MiniChipCol({ label, options, value, onChange }: { label: string; options: string[]; value: string; onChange: (v: string) => void }) {
+  return (
+    <div style={{ flex: 1, minWidth: 0 }}>
+      <div style={miniLabel}>{label}</div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+        {options.map(o => <MiniChip key={o} label={o} active={value === o} onClick={() => onChange(value === o ? '' : o)} />)}
+      </div>
+    </div>
+  )
+}
+// MiniSelect קומפקטי — כש-"אחר" נבחר, שדה הפירוט מופיע לצד ה-select באותה שורה (לא דוחף למטה)
+function MiniSelect({ label, options, value, onChange, otherValue, onOther, placeholder = 'בחר' }: {
+  label: string; options: string[]; value: string; onChange: (v: string) => void
+  otherValue?: string; onOther?: (v: string) => void; placeholder?: string
+}) {
+  const showOther = value === 'אחר' && !!onOther
+  const selStyle: React.CSSProperties = {
+    ...inputStyle, height: 30, fontSize: 11, fontWeight: 600, padding: '0 6px',
+    appearance: 'none', cursor: 'pointer', color: value ? '#111' : '#999',
+    width: 'auto', minWidth: 0, flex: showOther ? '0 0 46%' : 1,
+  }
+  return (
+    <div style={{ flex: 1, minWidth: 0 }}>
+      <div style={miniLabel}>{label}</div>
+      <div style={{ display: 'flex', gap: 4 }}>
+        <select dir="rtl" value={value} onChange={e => onChange(e.target.value)} style={selStyle}>
+          <option value="" disabled hidden>{placeholder}</option>
+          {options.map(o => <option key={o} value={o}>{o}</option>)}
+        </select>
+        {showOther && (
+          <input dir="rtl" maxLength={20} value={otherValue ?? ''} placeholder="פירוט…"
+            onChange={e => onOther!(e.target.value)}
+            style={{ ...inputStyle, height: 30, fontSize: 11, padding: '0 6px', flex: 1, minWidth: 0 }} />
+        )}
+      </div>
+    </div>
+  )
+}
+// dropdown שמראה שדה טקסט ל"אחר" באותה שורה (side-by-side) — הטקסט נשמר inline באובייקט המבנה
+function InlineSelectOther({ value, otherValue, options, onChange, onOther }: {
+  value: string; otherValue: string; options: string[]; onChange: (v: string) => void; onOther: (v: string) => void
+}) {
+  if (value === 'אחר') {
+    return (
+      <div style={{ display: 'flex', gap: 6 }}>
+        <div style={{ flex: '0 0 44%', minWidth: 0 }}>
+          <SelectBox value={value} onChange={onChange} options={options} />
+        </div>
+        <input dir="rtl" maxLength={20} value={otherValue} placeholder="פירוט…"
+          onChange={e => onOther(e.target.value)} style={{ ...inputStyle, flex: 1, minWidth: 0 }} />
+      </div>
+    )
+  }
+  return <SelectBox value={value} onChange={onChange} options={options} />
+}
+
+// ── כרטיס מבנה בבלוק החלפת אסבסט ───────────────────────────────
+function AsbestosBuildingCard({ idx, b, canRemove, onChange, onRemove }: {
+  idx: number; b: AsbestosBuilding; canRemove: boolean
+  onChange: (p: Partial<AsbestosBuilding>) => void; onRemove: () => void
+}) {
+  const set = onChange
+  return (
+    <div style={{ border: '1.5px solid #ebebeb', borderRadius: 9, padding: 8, marginBottom: 8, background: '#fff', direction: 'rtl' }}>
+      {/* כותרת — שורה אחת */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'nowrap' }}>
+        <span style={{ color: ASB_RED, fontWeight: 800, fontSize: 13, whiteSpace: 'nowrap' }}>מבנה {idx + 1}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}>
+          <span style={{ fontSize: 10, fontWeight: 700, color: '#777' }}>מקל סבא</span>
+          {ASB_YESNO.map(o => <MiniChip key={o} label={o} active={b.grandpaStick === o} onClick={() => set({ grandpaStick: b.grandpaStick === o ? '' : o })} />)}
+        </div>
+        <div style={{ flex: 1 }} />
+        <button type="button" onClick={() => set({ noteOpen: !b.noteOpen })} style={asbNoteBtn}>{b.noteOpen ? '✕ הערה' : '＋ הערה'}</button>
+        {canRemove && <button type="button" onClick={onRemove} title="הסר מבנה" style={asbRemoveBtn}>✕</button>}
+      </div>
+      {b.noteOpen && <div style={{ marginBottom: 8 }}><AutoTextArea value={b.note} onChange={v => set({ note: v })} placeholder="הערה למבנה…" /></div>}
+
+      <div style={grid2}>
+        <Field label="נ.צ. X"><TextInput value={b.coordX} onChange={v => set({ coordX: v })} placeholder="X" /></Field>
+        <Field label="נ.צ. Y"><TextInput value={b.coordY} onChange={v => set({ coordY: v })} placeholder="Y" /></Field>
+      </div>
+      <div style={grid2}>
+        <Field label={'גודל גג (מ"ר)'}><TextInput type="number" value={b.roofSize} onChange={v => set({ roofSize: v })} placeholder={'מ"ר'} /></Field>
+        <Field label="סוג מבנה"><InlineSelectOther value={b.structureType} otherValue={b.structureTypeOther} options={ASB_STRUCTURE_OPTS} onChange={v => set({ structureType: v })} onOther={v => set({ structureTypeOther: v })} /></Field>
+      </div>
+      <div style={grid2}>
+        <Field label="קונסטרוקציה"><InlineSelectOther value={b.construction} otherValue={b.constructionOther} options={ASB_CONSTRUCTION_OPTS} onChange={v => set({ construction: v })} onOther={v => set({ constructionOther: v })} /></Field>
+        <Field label="גובה (מ')"><TextInput type="number" value={b.height} onChange={v => set({ height: v })} placeholder="מ'" /></Field>
+      </div>
+
+      {/* שורת צ'יפים 1 — שלוש עמודות שוות */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 8, marginTop: 2 }}>
+        <MiniChipCol label="מצב קונס'" options={ASB_CONS_STATE_OPTS} value={b.consState} onChange={v => set({ consState: v })} />
+        <MiniChipCol label="תקרה קשיחה" options={ASB_YESNO} value={b.ceiling} onChange={v => set({ ceiling: v, ceilingType: v === 'יש' ? b.ceilingType : '', ceilingTypeOther: v === 'יש' ? b.ceilingTypeOther : '' })} />
+        {b.ceiling === 'יש'
+          ? <MiniSelect label="סוג תקרה" options={ASB_CEILING_TYPE_OPTS} value={b.ceilingType}
+              onChange={v => set({ ceilingType: v, ceilingTypeOther: v === 'אחר' ? b.ceilingTypeOther : '' })}
+              otherValue={b.ceilingTypeOther} onOther={v => set({ ceilingTypeOther: v })} />
+          : <div style={{ flex: 1 }} />}
+      </div>
+
+      {/* שורת צ'יפים 2 — שלוש עמודות שוות */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+        <MiniChipCol label="תשתית" options={ASB_INFRA_OPTS} value={b.infra} onChange={v => set({ infra: v })} />
+        <MiniChipCol label="סוג אסבסט" options={ASB_KIND_OPTS} value={b.asbestosKind} onChange={v => set({ asbestosKind: v, asbestosSub: v === 'אחר' ? b.asbestosSub : '', asbestosSubOther: v === 'אחר' ? b.asbestosSubOther : '' })} />
+        {b.asbestosKind === 'אחר'
+          ? <MiniSelect label="סוג" options={ASB_SUB_OPTS} value={b.asbestosSub}
+              onChange={v => set({ asbestosSub: v, asbestosSubOther: v === 'אחר' ? b.asbestosSubOther : '' })}
+              otherValue={b.asbestosSubOther} onOther={v => set({ asbestosSubOther: v })} />
+          : <div style={{ flex: 1 }} />}
+      </div>
+
+      {/* קירוי חדש */}
+      <div>
+        <div style={miniLabel}>קירוי חדש</div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+          {ASB_NEWROOF_OPTS.map(o => (
+            <MiniChip key={o} label={o} active={b.newRoof === o}
+              onClick={() => set({ newRoof: b.newRoof === o ? '' : o, newRoofNote: (b.newRoof === o || o === 'ללא') ? '' : b.newRoofNote })} />
+          ))}
+        </div>
+        {b.newRoof !== '' && b.newRoof !== 'ללא' && (
+          <div style={{ marginTop: 6 }}><TextInput value={b.newRoofNote} onChange={v => set({ newRoofNote: v })} placeholder="פירוט קירוי…" /></div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ── בלוק דינמי לפי סוג עבודה ───────────────────────────────────
 function WorkBlock({ typeKey, blocks, patch, others, setOther }: {
   typeKey: string; blocks: WorkBlocks; patch: (p: Partial<WorkBlocks>) => void
@@ -406,31 +622,37 @@ function WorkBlock({ typeKey, blocks, patch, others, setOther }: {
 }) {
   const oProps = { others, setOther }
   if (typeKey === 'asbestos') {
-    const b = blocks.asbestos
-    const set = (p: Partial<AsbestosBlock>) => patch({ asbestos: { ...b, ...p } })
+    const blk = blocks.asbestos
+    const buildings = blk.buildings ?? []
+    const setBlk = (p: Partial<AsbestosBlock>) => patch({ asbestos: { ...blk, ...p } })
+    const setB = (i: number, p: Partial<AsbestosBuilding>) =>
+      setBlk({ buildings: buildings.map((bb, j) => (j === i ? { ...bb, ...p } : bb)) })
+    const addBuilding = () => setBlk({ buildings: [...buildings, emptyAsbBuilding()] })
+    const removeBuilding = (i: number) => setBlk({ buildings: buildings.filter((_, j) => j !== i) })
+    const totalArea = buildings.reduce((s, bb) => s + num(bb.roofSize), 0)
     return (
-      <>
-        <div style={grid2}>
-          <Field label="נ.צ. X"><TextInput value={b.coordX} onChange={v => set({ coordX: v })} placeholder="X" /></Field>
-          <Field label="נ.צ. Y"><TextInput value={b.coordY} onChange={v => set({ coordY: v })} placeholder="Y" /></Field>
+      <div style={{ direction: 'rtl' }}>
+        {buildings.map((bb, i) => (
+          <AsbestosBuildingCard key={i} idx={i} b={bb} canRemove={buildings.length > 1}
+            onChange={p => setB(i, p)} onRemove={() => removeBuilding(i)} />
+        ))}
+
+        <button type="button" onClick={addBuilding} style={{
+          width: '100%', background: 'transparent', border: `1.5px dashed ${ASB_RED}`, color: ASB_RED,
+          borderRadius: 9, padding: 10, fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
+          direction: 'rtl', marginBottom: 8,
+        }}>＋ הוסף מבנה</button>
+
+        {/* סיכום + הערות פרויקט */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 12, fontWeight: 800, color: '#333' }}>{fmt(totalArea)} מ"ר · {buildings.length} מבנים</span>
+          <div style={{ flex: 1 }} />
+          <button type="button" onClick={() => setBlk({ generalNoteOpen: !blk.generalNoteOpen })} style={asbNoteBtn}>{blk.generalNoteOpen ? '✕ הערה' : '＋ הערה'}</button>
+          <button type="button" onClick={() => setBlk({ sensitiveOpen: !blk.sensitiveOpen })} style={asbNoteBtn}>{blk.sensitiveOpen ? '✕ מבנים רגישים' : '＋ מבנים רגישים'}</button>
         </div>
-        <div style={grid2}>
-          <Field label="למה משמש"><SelectOther value={b.usedFor} onChange={v => set({ usedFor: v })} options={USED_FOR_OPTS} okey="asb.usedFor" {...oProps} /></Field>
-          <Field label="קונסטרוקציה"><SelectOther value={b.ceilingConstruction} onChange={v => set({ ceilingConstruction: v })} options={CONSTRUCTIONS} okey="asb.construction" {...oProps} /></Field>
-        </div>
-        <div style={grid2}>
-          <Field label="תקרה קשיחה"><SelectOther value={b.ceiling} onChange={v => set({ ceiling: v })} options={CEILING_OPTS} okey="asb.ceiling" {...oProps} /></Field>
-          <Field label="סוג תקרה"><SelectOther value={b.ceilingType} onChange={v => set({ ceilingType: v })} options={CEILING_TYPE_OPTS} okey="asb.ceilingType" {...oProps} /></Field>
-        </div>
-        <div style={grid2}>
-          <Field label="מקל סבא"><SelectBox value={b.grandpaStick} onChange={v => set({ grandpaStick: v })} options={GRANDPA_OPTS} /></Field>
-          <Field label="סוג אסבסט"><SelectOther value={b.asbestosType} onChange={v => set({ asbestosType: v })} options={ASBESTOS_TYPE_OPTS} okey="asb.type" {...oProps} /></Field>
-        </div>
-        <div style={grid2}>
-          <Field label="מוקצף"><YesNoChip value={!!b.foamed} onChange={v => set({ foamed: v })} /></Field>
-        </div>
-        <Field label="מבנים רגישים"><AutoTextArea value={b.sensitive} onChange={v => set({ sensitive: v })} placeholder="מבנים רגישים בסביבה" /></Field>
-      </>
+        {blk.generalNoteOpen && <div style={{ marginTop: 8 }}><AutoTextArea value={blk.generalNote} onChange={v => setBlk({ generalNote: v })} placeholder="הערה כללית לפרויקט…" /></div>}
+        {blk.sensitiveOpen && <div style={{ marginTop: 8 }}><AutoTextArea value={blk.sensitive} onChange={v => setBlk({ sensitive: v })} placeholder="מבנים רגישים בסביבה…" /></div>}
+      </div>
     )
   }
   if (typeKey === 'roofReplace') {
@@ -945,7 +1167,7 @@ export default function NewExecutionSheet() {
         general: { ...base.general, ...(wc.general ?? {}) },
         logistics: { ...base.logistics, ...(wc.logistics ?? {}) },
         workTypes: wc.workTypes ?? (b?.work_types ?? []),
-        blocks: { ...emptyBlocks(), ...(wc.blocks ?? {}) },
+        blocks: { ...emptyBlocks(), ...(wc.blocks ?? {}), asbestos: normalizeAsbestos(wc.blocks?.asbestos) },
         materials: normalizeMaterials(b?.materials, base.materials),
         documentation: { ...base.documentation, ...(wc.documentation ?? {}) },
         progress: (() => {
@@ -1004,10 +1226,16 @@ export default function NewExecutionSheet() {
     if (!uid) { lastErrRef.current = 'החיבור פג. התחבר מחדש ונסה שוב.'; return null }
 
     const projectName = f.details.customerName.trim() || f.details.address.trim() || 'דף ביצוע — ללא שם'
+    // בלוק החלפת אסבסט — מבנים כמערך; ממושכפל לעמודות ייעודיות ל-execution_sheets (דיווח/רשימה)
+    const asbActive = f.workTypes.includes('asbestos')
+    const asbBuildings = asbActive ? (f.blocks.asbestos.buildings ?? []) : []
+    const asbTotalArea = asbBuildings.reduce((s, b) => s + num(b.roofSize), 0)
     const payload = {
       project_name: projectName,
       sheet_date: f.details.date || todayISO(),
-      num_buildings: 1,
+      num_buildings: asbActive ? Math.max(1, asbBuildings.length) : 1,
+      asbestos_buildings: asbBuildings,
+      asbestos_total_area: asbTotalArea,
       filled_by: uid,
       filled_by_name: f.details.fillerName || profile?.full_name || '',
       created_by: uid,

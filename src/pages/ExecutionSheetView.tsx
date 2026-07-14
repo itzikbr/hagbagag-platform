@@ -19,7 +19,7 @@ const STATUS_META: Record<string, { label: string; bg: string; color: string }> 
 }
 
 const WORK_TYPE_LABEL: Record<string, string> = {
-  asbestos: '🟠 הסרת אסבסט', roofReplace: '🏠 החלפת גג', aluminum: '🔩 ציפוי אלומיניום',
+  asbestos: '🟠 החלפת אסבסט', roofReplace: '🏠 החלפת גג', aluminum: '🔩 ציפוי אלומיניום',
   gutters: '🌧️ מרזבים', insulation: '🧊 בידוד', other: '📝 אחר',
 }
 const CATEGORY_LABEL: Record<string, string> = {
@@ -40,8 +40,22 @@ interface MaterialCategory {
   rows?: MaterialRow[]; roofingType?: string; sheetThickness?: string; roofColor?: string
   topThickness?: string; bottomThickness?: string; fillType?: string; tileType?: string
 }
+interface AsbBuilding {
+  coordX?: string; coordY?: string; roofSize?: string
+  structureType?: string; structureTypeOther?: string
+  construction?: string; constructionOther?: string; height?: string
+  grandpaStick?: string; consState?: string; ceiling?: string; ceilingType?: string; ceilingTypeOther?: string
+  infra?: string; asbestosKind?: string; asbestosSub?: string; asbestosSubOther?: string
+  newRoof?: string; newRoofNote?: string; note?: string
+}
+interface AsbestosBlock {
+  buildings?: AsbBuilding[]; generalNote?: string; sensitive?: string
+  // תאימות לאחור — שדות מבנה ישן
+  coordX?: string; coordY?: string; usedFor?: string; ceiling?: string
+  ceilingType?: string; ceilingConstruction?: string; grandpaStick?: string; asbestosType?: string
+}
 interface Blocks {
-  asbestos?: Record<string, string> & { foamed?: boolean }
+  asbestos?: AsbestosBlock
   roofReplace?: Record<string, string>
   aluminum?: { shade?: string; meters?: string; coating?: string[] }
   gutters?: Record<string, string>
@@ -254,21 +268,45 @@ export default function ExecutionSheetView() {
           </Section>
         )}
 
-        {/* הסרת אסבסט */}
+        {/* החלפת אסבסט (רב-מבנים) */}
         {wt.includes('asbestos') && blocks.asbestos && (() => {
           const a = blocks.asbestos!
-          const badge = (has(a.coordX) || has(a.coordY)) ? `${a.coordX || '—'} / ${a.coordY || '—'}` : undefined
+          // תאימות לאחור: מבנה ישן ללא מערך buildings → עוטפים כמבנה יחיד
+          const buildings: AsbBuilding[] = Array.isArray(a.buildings) && a.buildings.length
+            ? a.buildings
+            : (has(a.coordX) || has(a.coordY) || has(a.usedFor))
+              ? [{ coordX: a.coordX, coordY: a.coordY, structureType: a.usedFor, construction: a.ceilingConstruction, ceiling: a.ceiling, ceilingType: a.ceilingType, grandpaStick: a.grandpaStick, asbestosKind: a.asbestosType }]
+              : []
+          if (buildings.length === 0 && !has(a.sensitive) && !has(a.generalNote)) return null
+          const totalArea = buildings.reduce((s, b) => s + num(b.roofSize), 0)
+          const other = (v?: string, o?: string) => (v === 'אחר' && has(o) ? o : v)
+          const badge = buildings.length ? `${totalArea || 0} מ"ר · ${buildings.length} מבנים` : undefined
           return (
-            <Section icon="🟡" title="הסרת אסבסט" badge={badge}>
-              <Grid>
-                <Row label="למה משמש" value={pick(a.usedFor, 'asb.usedFor')} />
-                <Row label="קונסטרוקציה" value={pick(a.ceilingConstruction, 'asb.construction')} />
-                <Row label="תקרה קשיחה" value={pick(a.ceiling, 'asb.ceiling')} />
-                <Row label="סוג תקרה" value={pick(a.ceilingType, 'asb.ceilingType')} />
-                <Row label="מקל סבא" value={a.grandpaStick} />
-                <Row label="סוג אסבסט" value={pick(a.asbestosType, 'asb.type')} />
-                <Row label="מוקצף" value={a.foamed ? 'כן' : 'לא'} />
-              </Grid>
+            <Section icon="🟠" title="החלפת אסבסט" badge={badge}>
+              {buildings.map((b, i) => (
+                <div key={i} style={{ borderTop: i > 0 ? `1px solid ${BORDER}` : 'none', paddingTop: i > 0 ? 4 : 0 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', padding: '7px 12px 2px', direction: 'rtl' }}>
+                    <span style={{ fontSize: 14, fontWeight: 800, color: '#c0392b' }}>מבנה {i + 1}</span>
+                    {(has(b.coordX) || has(b.coordY)) && <span style={{ fontSize: 13, fontWeight: 600, color: GREY }} dir="ltr">{b.coordX || '—'} / {b.coordY || '—'}</span>}
+                  </div>
+                  <Grid>
+                    <Row label={'גודל גג (מ"ר)'} value={b.roofSize} />
+                    <Row label="סוג מבנה" value={other(b.structureType, b.structureTypeOther)} />
+                    <Row label="קונסטרוקציה" value={other(b.construction, b.constructionOther)} />
+                    <Row label="גובה (מ')" value={b.height} />
+                    <Row label="מצב קונס'" value={b.consState} />
+                    <Row label="מקל סבא" value={b.grandpaStick} />
+                    <Row label="תקרה קשיחה" value={b.ceiling} />
+                    {b.ceiling === 'יש' && <Row label="סוג תקרה" value={other(b.ceilingType, b.ceilingTypeOther)} />}
+                    <Row label="תשתית" value={b.infra} />
+                    <Row label="סוג אסבסט" value={b.asbestosKind} />
+                    {b.asbestosKind === 'אחר' && <Row label="סוג" value={other(b.asbestosSub, b.asbestosSubOther)} />}
+                    <Row label="קירוי חדש" value={b.newRoof && b.newRoof !== 'ללא' && has(b.newRoofNote) ? `${b.newRoof} — ${b.newRoofNote}` : b.newRoof} />
+                  </Grid>
+                  {has(b.note) && <Row label="הערה" value={b.note} />}
+                </div>
+              ))}
+              <Row label="הערה כללית" value={a.generalNote} />
               <Row label="מבנים רגישים" value={a.sensitive} />
             </Section>
           )

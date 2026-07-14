@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { supabase } from '../lib/supabase'
+import { isAdminEmail } from '../lib/roles'
 import type { User } from '@supabase/supabase-js'
 
 export type UserRole = 'admin' | 'manager' | 'office' | 'field_worker' | 'external'
@@ -102,3 +103,8 @@ export const useAuth = create<AuthState>((set, get) => ({
     })
   },
 }))
+
+// ──────────────────────────────────────────────
+// האם המשתמש המחובר הוא אדמין (לפי אימייל)
+// ──────────────────────────────────────────────
+export const useIsAdmin = () => useAuth(s => isAdminEmail(s.user?.email))

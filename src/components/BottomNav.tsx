@@ -1,5 +1,5 @@
 import { useNavigate, useLocation } from 'react-router-dom'
-import { useAuth } from '../hooks/useAuth'
+import { useIsAdmin } from '../hooks/useAuth'
 
 interface BottomNavProps {
   activeTab: 'chats' | 'sheets' | 'more' | 'itzik'
@@ -9,14 +9,14 @@ interface BottomNavProps {
 export default function BottomNav({ activeTab, onTabChange }: BottomNavProps) {
   const navigate = useNavigate()
   const location = useLocation()
-  const { profile } = useAuth()
+  const isAdmin = useIsAdmin()
 
   const isChats = location.pathname.startsWith('/chat') || location.pathname === '/chats'
   const isSheets = location.pathname === '/sheets'
   const isItzik = location.pathname === '/itzik'
 
-  // הטאב האישי מוצג רק למנהלים / אדמין
-  const showItzik = profile?.role === 'admin' || profile?.role === 'manager'
+  // הטאב האישי (⚡) מוצג רק לאדמין
+  const showItzik = isAdmin
 
   const tabs = [
     {

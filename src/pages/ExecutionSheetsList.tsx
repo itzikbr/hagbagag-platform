@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { useAuth, useIsAdmin } from '../hooks/useAuth'
 
 interface SheetRow {
   id: string
@@ -23,6 +24,8 @@ const STATUS_META: Record<string, { label: string; bg: string; color: string }> 
 
 export default function ExecutionSheetsList() {
   const navigate = useNavigate()
+  const isAdmin = useIsAdmin()
+  const logout = useAuth(s => s.logout)
   const [sheets, setSheets] = useState<SheetRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -156,6 +159,7 @@ export default function ExecutionSheetsList() {
         alignItems: 'center',
         justifyContent: 'center',
         flexShrink: 0,
+        position: 'relative',
       }}>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', lineHeight: 1.15 }}>
           <span style={{ color: '#fff', fontSize: 20, fontWeight: 700 }}>דפי ביצוע</span>
@@ -163,6 +167,23 @@ export default function ExecutionSheetsList() {
             חג בגג
           </span>
         </div>
+        {/* כפתור יציאה — למשתמש שאינו אדמין אין ניווט תחתון, אז זו דרך היציאה היחידה */}
+        {!isAdmin && (
+          <button
+            onClick={async () => { await logout(); navigate('/login', { replace: true }) }}
+            title="יציאה"
+            style={{
+              position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)',
+              background: 'none', border: 'none', cursor: 'pointer', padding: 6,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}
+          >
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              <path d="M16 17l5-5-5-5M21 12H9" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </button>
+        )}
       </div>
 
       {/* Search */}
