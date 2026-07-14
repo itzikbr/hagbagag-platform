@@ -812,7 +812,7 @@ type TabKey = 'details' | 'docs' | 'materials' | 'progress'
 
 export default function NewExecutionSheet() {
   const navigate = useNavigate()
-  const { profile } = useAuth()
+  const { profile, user } = useAuth()
   const { id: editId } = useParams<{ id: string }>()
 
   const [tab, setTab] = useState<TabKey>('details')
@@ -910,11 +910,26 @@ export default function NewExecutionSheet() {
   }, [editId])
 
   // ── שמירה ל-Supabase ──────────────────────────────────────────
+  // רשת תקועה / Supabase שלא מגיב יכולים להשאיר את ה-await תלוי לנצח,
+  // וה-finally שמכבה את "שומר…" לא ירוץ. מרוץ מול timeout מבטיח שהבטחה תיסגר תמיד.
+  function withTimeout<T>(p: Promise<T>, ms = 15000): Promise<T> {
+    return Promise.race([
+      p,
+      new Promise<T>((_, reject) =>
+        setTimeout(() => reject(new Error('הבקשה לא הושלמה בזמן (ייתכן בעיית רשת). נסה שוב.')), ms)
+      ),
+    ])
+  }
+
   async function persist(status: 'field' | 'submitted'): Promise<string | null> {
     lastErrRef.current = null
     const f = latest.current
-    const { data: { session } } = await supabase.auth.getSession()
-    const uid = session?.user?.id ?? null
+    // מזהה המשתמש נשלף מה-store בזיכרון ולא מ-supabase.auth.getSession().
+    // getSession נכנס למכונת ה-auth-lock/refresh של supabase-js, שב-PWA של iOS
+    // (standalone) עלולה להיתקע ולתלות את כל השמירה עד ל-timeout של 15ש׳ —
+    // גם כשהרשת תקינה והשרת מגיב. ה-access token מצורף אוטומטית לבקשות ה-REST,
+    // אז כאן צריך רק את ה-uid, שכבר קיים ב-store מרגע ההתחברות.
+    const uid = user?.id ?? null
     if (!uid) { lastErrRef.current = 'החיבור פג. התחבר מחדש ונסה שוב.'; return null }
 
     const projectName = f.details.customerName.trim() || f.details.address.trim() || 'דף ביצוע — ללא שם'
@@ -991,18 +1006,22 @@ export default function NewExecutionSheet() {
     if (savingRef.current) return
     savingRef.current = true; setSaving(true)
     try {
-      const sid = await persist('field')
+      const sid = await withTimeout(persist('field'))
       if (sid) { setFlash('נשמר ✓'); setTimeout(() => setFlash(null), 1600) }
       else alert(lastErrRef.current ?? 'השמירה נכשלה')
+    } catch (e) {
+      alert(`השמירה נכשלה: ${e instanceof Error ? e.message : String(e)}`)
     } finally { savingRef.current = false; setSaving(false) }
   }
   async function submit() {
     if (savingRef.current) return
     savingRef.current = true; setSaving(true)
     try {
-      const sid = await persist('submitted')
+      const sid = await withTimeout(persist('submitted'))
       if (sid) { alert('✓ הדף נשמר ואושר בהצלחה'); navigate('/sheets') }
       else alert(lastErrRef.current ?? 'השמירה נכשלה')
+    } catch (e) {
+      alert(`השמירה נכשלה: ${e instanceof Error ? e.message : String(e)}`)
     } finally { savingRef.current = false; setSaving(false) }
   }
 
@@ -1016,7 +1035,14 @@ export default function NewExecutionSheet() {
     clearTimeout(saveTimer.current)
     saveTimer.current = setTimeout(() => {
       if (savingRef.current) return
-      persist('field').then(sid => { if (sid) { setFlash('נשמר אוטומטית ✓'); setTimeout(() => setFlash(null), 1300) } })
+      // מסמנים "בשמירה" גם באוטו-סייב כדי שלא ירוץ במקביל לשמירה ידנית (persist כפול
+      // על אותו דף) — וגם כאן עוטפים ב-withTimeout כדי שבקשה תקועה ב-iOS PWA
+      // תשוחרר ולא תשאיר את הדגל דלוק. כשל אוטו-סייב שקט; שמירה ידנית תיתן משוב.
+      savingRef.current = true
+      withTimeout(persist('field'))
+        .then(sid => { if (sid) { setFlash('נשמר אוטומטית ✓'); setTimeout(() => setFlash(null), 1300) } })
+        .catch(() => { /* אוטו-סייב שקט */ })
+        .finally(() => { savingRef.current = false })
     }, AUTOSAVE_MS)
     return () => clearTimeout(saveTimer.current)
     // eslint-disable-next-line react-hooks/exhaustive-deps
