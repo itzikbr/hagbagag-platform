@@ -3,7 +3,7 @@
 // אחראי על: Push Notifications + Cache (offline basic)
 // ============================================================
 
-const CACHE_NAME = 'hagbagag-v2'
+const CACHE_NAME = 'hagbagag-v3'
 const OFFLINE_FALLBACK = '/offline.html'
 
 // קבצים לשמירה בקאש ראשוני

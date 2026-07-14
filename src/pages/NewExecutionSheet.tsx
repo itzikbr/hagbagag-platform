@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
@@ -24,6 +25,7 @@ const ARM_OPTS = ['לא נדרש', 'מספריים', 'זרוע']
 const ACCESS_OPTS = ['קלה', 'מוגבלת', 'קשה', 'ללא גישה']
 const LOGISTICS_CHIPS = ['פנויה', 'עצים', 'חשמל', 'דרך צרה', 'אחר']
 const CEILING_OPTS = ['יש', 'בטון', 'רביץ', 'צפה', 'אחר', 'אין']
+const CEILING_TYPE_OPTS = ['בטון', 'רביץ', 'צפה', 'גבס', 'אחר']
 const ALUM_SHADES = ['חום', 'פולי סנדר', 'מהגוני', 'לבן', 'קרם', 'אפור', 'ירוק', 'אחר']
 const GUTTER_TYPES = ['חיצוני', 'פנימי', 'חיצוני ופנימי', 'אחר']
 const USED_FOR_OPTS = ['מגורים', 'סככה פתוחה', 'סככה סגורה', 'מחסן', 'מבנה ציבורי', 'תעשייה', 'אחר']
@@ -86,6 +88,7 @@ const CATEGORY_ORDER = ['aluminum', 'roofing', 'flashing', 'wood', 'gutters', 'i
 interface DetailsTab {
   date: string
   fillerName: string
+  orderNumber: string
   customerName: string
   address: string
   phones: string[]
@@ -109,7 +112,7 @@ interface Logistics {
 }
 interface AsbestosBlock {
   coordX: string; coordY: string; usedFor: string
-  ceiling: string; ceilingConstruction: string
+  ceiling: string; ceilingType: string; ceilingConstruction: string
   grandpaStick: string; sensitive: string
   asbestosType: string; foamed: boolean          // סוג אסבסט + מוקצף
 }
@@ -178,7 +181,7 @@ interface SheetForm {
 function todayISO(): string { return new Date().toISOString().slice(0, 10) }
 function emptyBlocks(): WorkBlocks {
   return {
-    asbestos:    { coordX: '', coordY: '', usedFor: '', ceiling: '', ceilingConstruction: '', grandpaStick: '', sensitive: '', asbestosType: '', foamed: false },
+    asbestos:    { coordX: '', coordY: '', usedFor: '', ceiling: '', ceilingType: '', ceilingConstruction: '', grandpaStick: '', sensitive: '', asbestosType: '', foamed: false },
     roofReplace: { existingRoof: '', newRoof: '', construction: '', slope: '', overhang: '', overhangNote: '', sheetThickness: '', color: '', topThickness: '', bottomThickness: '', fillType: '', tileType: '' },
     aluminum:    { shade: '', meters: '', coating: [] },
     gutters:     { type: '', guttersM: '', guttersSegments: '', downUnits: '', downSegments: '' },
@@ -204,7 +207,7 @@ function emptyProgress(): ProgressData {
 }
 function emptyForm(): SheetForm {
   return {
-    details: { date: todayISO(), fillerName: '', customerName: '', address: '', phones: [''], solarPrep: false },
+    details: { date: todayISO(), fillerName: '', orderNumber: '', customerName: '', address: '', phones: [''], solarPrep: false },
     general: { roofHeight: '', area: '', roofType: '', construction: '', chips: [] },
     logistics: { crane: '', container: '', lift: '', arm: '', access: '', workHeight: '', chips: [] },
     workTypes: [],
@@ -262,10 +265,10 @@ const grid2: React.CSSProperties = { display: 'grid', gridTemplateColumns: '48% 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return <div style={{ minWidth: 0 }}><div style={labelStyle}>{label}</div>{children}</div>
 }
-function TextInput({ value, onChange, placeholder, type = 'text' }: {
-  value: string; onChange: (v: string) => void; placeholder?: string; type?: string
+function TextInput({ value, onChange, placeholder, type = 'text', maxLength }: {
+  value: string; onChange: (v: string) => void; placeholder?: string; type?: string; maxLength?: number
 }) {
-  return <input dir="rtl" type={type} style={inputStyle} value={value} placeholder={placeholder}
+  return <input dir="rtl" type={type} style={inputStyle} value={value} placeholder={placeholder} maxLength={maxLength}
     inputMode={type === 'number' ? 'decimal' : undefined}
     onChange={e => onChange(e.target.value)} />
 }
@@ -417,10 +420,13 @@ function WorkBlock({ typeKey, blocks, patch, others, setOther }: {
         </div>
         <div style={grid2}>
           <Field label="תקרה קשיחה"><SelectOther value={b.ceiling} onChange={v => set({ ceiling: v })} options={CEILING_OPTS} okey="asb.ceiling" {...oProps} /></Field>
-          <Field label="מקל סבא"><SelectBox value={b.grandpaStick} onChange={v => set({ grandpaStick: v })} options={GRANDPA_OPTS} /></Field>
+          <Field label="סוג תקרה"><SelectOther value={b.ceilingType} onChange={v => set({ ceilingType: v })} options={CEILING_TYPE_OPTS} okey="asb.ceilingType" {...oProps} /></Field>
         </div>
         <div style={grid2}>
+          <Field label="מקל סבא"><SelectBox value={b.grandpaStick} onChange={v => set({ grandpaStick: v })} options={GRANDPA_OPTS} /></Field>
           <Field label="סוג אסבסט"><SelectOther value={b.asbestosType} onChange={v => set({ asbestosType: v })} options={ASBESTOS_TYPE_OPTS} okey="asb.type" {...oProps} /></Field>
+        </div>
+        <div style={grid2}>
           <Field label="מוקצף"><YesNoChip value={!!b.foamed} onChange={v => set({ foamed: v })} /></Field>
         </div>
         <Field label="מבנים רגישים"><AutoTextArea value={b.sensitive} onChange={v => set({ sensitive: v })} placeholder="מבנים רגישים בסביבה" /></Field>
@@ -651,6 +657,8 @@ function DocSection({ icon, title, subtitle, items, onAdd, onRemove, onNote, upl
   onNote: (i: number, note: string, open: boolean) => void; uploading: boolean
 }) {
   const inputRef = useRef<HTMLInputElement>(null)
+  const [viewerPos, setViewerPos] = useState<number | null>(null)
+  const images = items.filter(it => it.url)
   return (
     <div style={{ background: '#fff', margin: '6px 8px', borderRadius: 10, boxShadow: '0 1px 3px rgba(0,0,0,0.07)', overflow: 'hidden' }}>
       <div style={{ background: '#F8F8F8', padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8, direction: 'rtl' }}>
@@ -666,7 +674,7 @@ function DocSection({ icon, title, subtitle, items, onAdd, onRemove, onNote, upl
           <div key={i} style={{ width: 64 }}>
             <div style={{ position: 'relative', width: 64, height: 64, borderRadius: 8, overflow: 'hidden', border: `1px solid ${BORDER}`, background: '#F5F5F5' }}>
               {it.url
-                ? <img src={it.url} alt={it.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                ? <img src={it.url} alt={it.name} onClick={() => setViewerPos(images.indexOf(it))} style={{ width: '100%', height: '100%', objectFit: 'cover', cursor: 'pointer' }} />
                 : <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 22 }}>📄</div>}
               <button type="button" onClick={() => onRemove(i)} style={{
                 position: 'absolute', top: 2, left: 2, width: 18, height: 18, borderRadius: '50%',
@@ -691,8 +699,71 @@ function DocSection({ icon, title, subtitle, items, onAdd, onRemove, onNote, upl
         <input ref={inputRef} type="file" accept="image/*" multiple style={{ display: 'none' }}
           onChange={e => { if (e.target.files?.length) onAdd(e.target.files); e.target.value = '' }} />
       </div>
+      {viewerPos !== null && images[viewerPos] && (
+        <ImageViewer images={images} pos={viewerPos} onPos={setViewerPos} onClose={() => setViewerPos(null)} />
+      )}
     </div>
   )
+}
+
+// ── מציג תמונות במסך מלא ────────────────────────────────────────
+function ImageViewer({ images, pos, onPos, onClose }: {
+  images: DocItem[]; pos: number; onPos: (p: number) => void; onClose: () => void
+}) {
+  const count = images.length
+  const go = useCallback((delta: number) => onPos((pos + delta + count) % count), [pos, count, onPos])
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+      else if (e.key === 'ArrowLeft') go(1)   // RTL: שמאלה = הבא
+      else if (e.key === 'ArrowRight') go(-1)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [go, onClose])
+
+  const cur = images[pos]
+  return createPortal(
+    <div onClick={onClose} style={{
+      position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.92)',
+      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+      paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)',
+    }}>
+      <button type="button" onClick={onClose} style={{
+        position: 'absolute', top: 'max(12px, env(safe-area-inset-top))', right: 16, width: 40, height: 40,
+        borderRadius: '50%', background: 'rgba(255,255,255,0.15)', color: '#fff', border: 'none',
+        fontSize: 24, lineHeight: 1, cursor: 'pointer', fontFamily: 'inherit',
+      }}>×</button>
+
+      <img src={cur.url} alt={cur.name} onClick={e => e.stopPropagation()} style={{
+        maxWidth: '92vw', maxHeight: '80vh', objectFit: 'contain', borderRadius: 6,
+      }} />
+
+      {(cur.note || count > 1) && (
+        <div onClick={e => e.stopPropagation()} style={{ marginTop: 14, textAlign: 'center', direction: 'rtl', maxWidth: '92vw' }}>
+          {cur.note && <div style={{ fontSize: 15, color: '#fff', marginBottom: 6, whiteSpace: 'pre-wrap' }}>{cur.note}</div>}
+          {count > 1 && <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.6)' }}>{pos + 1} / {count}</div>}
+        </div>
+      )}
+
+      {count > 1 && (
+        <>
+          <button type="button" onClick={e => { e.stopPropagation(); go(1) }} style={viewerNavBtn('left')}>‹</button>
+          <button type="button" onClick={e => { e.stopPropagation(); go(-1) }} style={viewerNavBtn('right')}>›</button>
+        </>
+      )}
+    </div>,
+    document.body,
+  )
+}
+
+function viewerNavBtn(side: 'left' | 'right'): React.CSSProperties {
+  return {
+    position: 'absolute', top: '50%', transform: 'translateY(-50%)', [side]: 12,
+    width: 44, height: 44, borderRadius: '50%', background: 'rgba(255,255,255,0.15)', color: '#fff',
+    border: 'none', fontSize: 30, lineHeight: 1, cursor: 'pointer', fontFamily: 'inherit',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+  }
 }
 
 // ── לשונית התקדמות ─────────────────────────────────────────────
@@ -1150,7 +1221,10 @@ export default function NewExecutionSheet() {
           <>
             <Card id="details" title="פרטים" {...noteProps}>
               <div style={{ marginBottom: 8 }}><Field label="תאריך"><TextInput type="date" value={form.details.date} onChange={v => patchDetails({ date: v })} /></Field></div>
-              <div style={{ marginBottom: 8 }}><Field label="ממלא הדף"><SelectBox value={form.details.fillerName} onChange={v => patchDetails({ fillerName: v })} options={FILLERS} /></Field></div>
+              <div style={grid2}>
+                <Field label="ממלא הדף"><SelectBox value={form.details.fillerName} onChange={v => patchDetails({ fillerName: v })} options={FILLERS} /></Field>
+                <Field label="הזמנה מס׳"><TextInput value={form.details.orderNumber} onChange={v => patchDetails({ orderNumber: v })} placeholder="מס׳ הזמנה" maxLength={12} /></Field>
+              </div>
               <div style={{ marginBottom: 8 }}><Field label="שם לקוח"><TextInput value={form.details.customerName} onChange={v => patchDetails({ customerName: v })} placeholder="שם הלקוח" /></Field></div>
               <div style={{ marginBottom: 8 }}><Field label="כתובת"><TextInput value={form.details.address} onChange={v => patchDetails({ address: v })} placeholder="כתובת האתר" /></Field></div>
               <div style={{ marginBottom: 8 }}>

@@ -49,7 +49,7 @@ interface Blocks {
   other?: { note?: string }
 }
 interface WorkContent {
-  details?: { date?: string; fillerName?: string; customerName?: string; address?: string; phones?: string[]; solarPrep?: boolean }
+  details?: { date?: string; fillerName?: string; orderNumber?: string; customerName?: string; address?: string; phones?: string[]; solarPrep?: boolean }
   general?: { roofHeight?: string; area?: string; roofType?: string; construction?: string; chips?: string[] }
   logistics?: { crane?: string; container?: string; lift?: string; arm?: string; access?: string; workHeight?: string; chips?: string[] }
   workTypes?: string[]
@@ -231,6 +231,7 @@ export default function ExecutionSheetView() {
             </div>
           )}
           {!has(d.customerName) && <Row label="כתובת" value={d.address} />}
+          {has(d.orderNumber) && <Row label="הזמנה מס׳" value={d.orderNumber} />}
           {phones.length > 0 && (
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10, padding: '7px 12px', direction: 'rtl' }}>
               <span style={{ fontSize: 13, fontWeight: 600, color: GREY, flexShrink: 0 }}>טלפון</span>
@@ -263,6 +264,7 @@ export default function ExecutionSheetView() {
                 <Row label="למה משמש" value={pick(a.usedFor, 'asb.usedFor')} />
                 <Row label="קונסטרוקציה" value={pick(a.ceilingConstruction, 'asb.construction')} />
                 <Row label="תקרה קשיחה" value={pick(a.ceiling, 'asb.ceiling')} />
+                <Row label="סוג תקרה" value={pick(a.ceilingType, 'asb.ceilingType')} />
                 <Row label="מקל סבא" value={a.grandpaStick} />
                 <Row label="סוג אסבסט" value={pick(a.asbestosType, 'asb.type')} />
                 <Row label="מוקצף" value={a.foamed ? 'כן' : 'לא'} />
