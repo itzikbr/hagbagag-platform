@@ -31,15 +31,20 @@ export default function ExecutionSheetsList() {
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
 
-  // מונה בקשות: רק התוצאה של הטעינה האחרונה מעדכנת את הנתונים, כדי שבקשה איטית/תקועה
-  // שהתחילה מוקדם לא תדרוס תוצאה טרייה יותר.
+  // מונה בקשות שהתחילו — משמש לזיהוי "מי הבקשה האחרונה".
   const reqSeq = useRef(0)
-  // מזהה הטעינה היזומה האחרונה — היא זו שאחראית לכבות את הספינר.
-  const fgSeq = useRef(0)
-  // האם כבר הצגנו נתונים בהצלחה פעם אחת (במהלך החיים של הרכיב הזה).
+  // ה-seq של התוצאה האחרונה שכבר הוחלה ל-state — תוצאה ישנה יותר לא תדרוס טרייה,
+  // אך תוצאה מוצלחת כן מוחלת גם אם בקשת רקע מאוחרת יותר עדיין רצה/נכשלה.
+  const appliedSeq = useRef(0)
+  // האם כבר הצגנו נתונים בהצלחה פעם אחת — שגיאת רקע לא תדרוס נתונים קיימים.
   const loadedOnce = useRef(false)
+  // מונע setState אחרי unmount.
+  const aliveRef = useRef(true)
+  // הטעינה הראשונית הסתיימה — רק אז מפעילים רענון-בחזרה (מונע מרוץ עם ה-mount).
+  const initialDoneRef = useRef(false)
 
   useEffect(() => {
+    aliveRef.current = true
     loadSheets()
 
     // Race condition: חוזרים לרשימה מיד אחרי navigate מדף שנשמר, והשורה
@@ -65,13 +70,15 @@ export default function ExecutionSheetsList() {
     // עובר mount מחדש (ואז ה-fetch של ה-mount לא רץ) — האזנה ל-visibility/focus/
     // pageshow מבטיחה fetch טרי בכל פעם שהמשתמש חוזר לרשימה. רענון רקע (בלי ספינר).
     const refreshOnReturn = () => {
-      if (document.visibilityState === 'visible') loadSheets({ background: true })
+      // רק אחרי שהטעינה הראשונית הסתיימה — כדי לא להתחרות ב-fetch של ה-mount
+      if (initialDoneRef.current && document.visibilityState === 'visible') loadSheets({ background: true })
     }
     document.addEventListener('visibilitychange', refreshOnReturn)
     window.addEventListener('focus', refreshOnReturn)
     window.addEventListener('pageshow', refreshOnReturn)
 
     return () => {
+      aliveRef.current = false
       clearTimeout(raceTimer)
       supabase.removeChannel(channel)
       document.removeEventListener('visibilitychange', refreshOnReturn)
@@ -85,7 +92,6 @@ export default function ExecutionSheetsList() {
   async function loadSheets({ background = false }: { background?: boolean } = {}) {
     const seq = ++reqSeq.current
     if (!background) {
-      fgSeq.current = seq
       setLoading(true)
       setError(null)
     }
@@ -107,32 +113,34 @@ export default function ExecutionSheetsList() {
       const { data, error } = await Promise.race([query, timeout]) as
         { data: SheetRow[] | null; error: { message: string } | null }
 
-      // בקשה מיושנת — טעינה חדשה יותר כבר רצה/הסתיימה. אל תיגע ב-state.
-      if (seq !== reqSeq.current) return
+      if (!aliveRef.current) return
 
       if (error) {
         console.error('[sheets] query error:', error)
-        if (!loadedOnce.current) setError('שגיאה בטעינת דפי הביצוע')
-        return
+        // שגיאה מוצגת רק אם עדיין אין נתונים כלל, ורק לבקשה האחרונה שהתחילה.
+        if (!loadedOnce.current && seq === reqSeq.current) setError('שגיאה בטעינת דפי הביצוע')
+      } else if (seq > appliedSeq.current) {
+        // מחילים כל תוצאה מוצלחת שטרייה יותר מזו שכבר הוחלה — כך תוצאה טובה
+        // מוקדמת לא הולכת לאיבוד גם אם בקשת רקע מאוחרת יותר עדיין רצה/נכשלת.
+        appliedSeq.current = seq
+        setSheets((data ?? []) as SheetRow[])
+        setError(null)
+        loadedOnce.current = true
       }
-
-      setSheets((data ?? []) as SheetRow[])
-      setError(null)
-      loadedOnce.current = true
-      // ברגע שיש נתונים להציג — מכבים את הספינר, גם אם זו טעינת רקע. אחרת, אם
-      // טעינת ה-mount היזומה נתקעת (רענון טוקן אחרי סגירת דף), הרשת הייתה נשארת
-      // על "טוען דפי ביצוע..." עד ה-timeout של 12 שניות למרות שהנתונים כבר הגיעו.
-      setLoading(false)
     } catch (e) {
       console.error('[sheets] loadSheets failed:', e)
-      // רק אם מעולם לא הצלחנו לטעון מציגים שגיאה; רענון רקע כושל לא ידרוס נתונים קיימים.
-      if (seq === reqSeq.current && !loadedOnce.current) {
+      // רק אם מעולם לא הצלחנו לטעון (ולבקשה האחרונה) מציגים שגיאה.
+      if (aliveRef.current && !loadedOnce.current && seq === reqSeq.current) {
         setError('לא הצלחנו לטעון את דפי הביצוע. בדוק את החיבור ונסה שוב.')
       }
     } finally {
       clearTimeout(timer)
-      // רק טעינה יזומה מכבה את הספינר — וגם רק אם היא עדיין הטעינה היזומה האחרונה.
-      if (!background && seq === fgSeq.current) setLoading(false)
+      // הספינר נכבה תמיד: כשהבקשה האחרונה שהתחילה הסתיימה, או ברגע שיש נתונים
+      // כלשהם להציג — כך הוא לעולם לא נתקע על "טוען דפי ביצוע..." לצמיתות.
+      if (aliveRef.current && (seq === reqSeq.current || loadedOnce.current)) {
+        setLoading(false)
+        initialDoneRef.current = true
+      }
     }
   }
 
