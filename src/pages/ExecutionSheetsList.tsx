@@ -297,6 +297,7 @@ export default function ExecutionSheetsList() {
         {!loading && !error && filtered.map((d, i) => (
           <SheetCard key={d.id} d={d} index={i} view={view}
             onOpen={() => navigate(`/sheets/${d.id}`)}
+            onView={() => navigate(`/sheets/${d.id}/view`)}
             onArchive={() => archiveSheet(d.id)}
             onDelete={() => deleteSheet(d.id)} />
         ))}
@@ -316,45 +317,110 @@ export default function ExecutionSheetsList() {
   )
 }
 
-// ── כרטיס דף ──────────────────────────────────────────────────
-function SheetCard({ d, index, view, onOpen, onArchive, onDelete }: {
+// ── כרטיס דף (עם החלקה לחשיפת פעולות) ─────────────────────────
+const ACTION_W = 96   // רוחב כפתור הפעולה שנחשף בהחלקה
+const THRESHOLD = 56  // מרחק גרירה מינימלי לנעילה על פעולה
+
+function SheetCard({ d, index, view, onOpen, onView, onArchive, onDelete }: {
   d: DecoratedSheet; index: number; view: View
-  onOpen: () => void; onArchive: () => void; onDelete: () => void
+  onOpen: () => void; onView: () => void; onArchive: () => void; onDelete: () => void
 }) {
   const bg = d.when === 'today' ? '#FFF0EE' : (index % 2 === 0 ? '#ffffff' : '#F5F2EF')
   const badge = BADGE[d.when]
   const title = d.address ? `${shortName(d.name)} · ${d.address}` : shortName(d.name)
   const row2Parts = [d.subcontractor, d.teamLead].filter(Boolean).join(' · ')
 
-  return (
-    <div onClick={onOpen} style={{
-      background: bg, borderBottom: '1px solid #F0F2F5', padding: '12px 16px',
-      cursor: 'pointer', userSelect: 'none', direction: 'rtl',
-    }}>
-      {/* Row 1 */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <span style={{ flex: 1, minWidth: 0, fontSize: 17, fontWeight: 900, color: '#111', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {title}
-        </span>
-        {view === 'active' ? (
-          <button onClick={e => { e.stopPropagation(); onArchive() }} title="ארכב"
-            style={iconBtn}>📦</button>
-        ) : (
-          <button onClick={e => { e.stopPropagation(); onDelete() }} title="מחק לצמיתות"
-            style={iconBtn}>🗑️</button>
-        )}
-      </div>
+  // offset שלילי = החלקה שמאלה (חושף פעולה אדומה בצד ימין);
+  // offset חיובי = החלקה ימינה (חושף "צפייה" כחול בצד שמאל)
+  const [offset, setOffset] = useState(0)
+  const [dragging, setDragging] = useState(false)
+  const startX = useRef(0)
+  const startOffset = useRef(0)
+  const moved = useRef(false)
 
-      {/* Row 2 */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
-        <span style={{ fontSize: 14, fontWeight: 700, background: badge.bg, color: badge.color, borderRadius: 8, padding: '2px 9px', flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}>
-          {fmtDM(d.execDate)}
-        </span>
-        {row2Parts && (
-          <span style={{ fontSize: 14, fontWeight: 600, color: '#555', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {row2Parts}
+  function onTouchStart(e: React.TouchEvent) {
+    startX.current = e.touches[0].clientX
+    startOffset.current = offset
+    moved.current = false
+    setDragging(true)
+  }
+  function onTouchMove(e: React.TouchEvent) {
+    const dx = e.touches[0].clientX - startX.current
+    if (Math.abs(dx) > 6) moved.current = true
+    let next = startOffset.current + dx
+    if (next > ACTION_W) next = ACTION_W + (next - ACTION_W) * 0.3
+    if (next < -ACTION_W) next = -ACTION_W + (next + ACTION_W) * 0.3
+    setOffset(next)
+  }
+  function onTouchEnd() {
+    setDragging(false)
+    if (offset <= -THRESHOLD) setOffset(-ACTION_W)
+    else if (offset >= THRESHOLD) setOffset(ACTION_W)
+    else setOffset(0)
+  }
+  function handleClick() {
+    if (offset !== 0) { setOffset(0); return }   // שורה פתוחה/נגררה → קליק סוגר
+    if (moved.current) return
+    onOpen()
+  }
+  function leftAction() {   // אדום — ארכיון (תצוגה רגילה) או מחיקה (ארכיון)
+    setOffset(0)
+    if (view === 'active') onArchive(); else onDelete()
+  }
+  function rightAction() {  // כחול — צפייה
+    setOffset(0)
+    onView()
+  }
+  const transition = dragging ? 'none' : 'transform 0.2s ease'
+
+  return (
+    <div data-when={d.when} style={{ position: 'relative', overflow: 'hidden', borderBottom: '1px solid #F0F2F5' }}>
+      {/* החלקה שמאלה → אדום (ארכיון/מחיקה), נחשף בצד ימין */}
+      <button type="button" onClick={leftAction} style={{
+        position: 'absolute', top: 0, bottom: 0, right: 0, width: ACTION_W,
+        background: RED, color: '#fff', border: 'none', fontSize: 14, fontWeight: 700,
+        cursor: 'pointer', fontFamily: 'inherit', direction: 'rtl',
+        display: offset < 0 ? 'flex' : 'none', alignItems: 'center', justifyContent: 'center',
+      }}>{view === 'active' ? 'ארכיון 📦' : 'מחק 🗑'}</button>
+
+      {/* החלקה ימינה → כחול (צפייה), נחשף בצד שמאל */}
+      <button type="button" onClick={rightAction} style={{
+        position: 'absolute', top: 0, bottom: 0, left: 0, width: ACTION_W,
+        background: BLUE, color: '#fff', border: 'none', fontSize: 14, fontWeight: 700,
+        cursor: 'pointer', fontFamily: 'inherit', direction: 'rtl',
+        display: offset > 0 ? 'flex' : 'none', alignItems: 'center', justifyContent: 'center',
+      }}>צפייה 👁</button>
+
+      <div onClick={handleClick} onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}
+        style={{
+          background: bg, padding: '6px 16px', cursor: 'pointer', userSelect: 'none', direction: 'rtl',
+          transform: `translateX(${offset}px)`, transition, position: 'relative',
+        }}>
+        {/* Row 1 */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ flex: 1, minWidth: 0, fontSize: 17, fontWeight: 900, color: '#111', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {title}
           </span>
-        )}
+          {view === 'active' ? (
+            <button onClick={e => { e.stopPropagation(); onArchive() }} title="ארכב"
+              style={iconBtn}>📦</button>
+          ) : (
+            <button onClick={e => { e.stopPropagation(); onDelete() }} title="מחק לצמיתות"
+              style={iconBtn}>🗑️</button>
+          )}
+        </div>
+
+        {/* Row 2 */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+          <span style={{ fontSize: 14, fontWeight: 700, background: badge.bg, color: badge.color, borderRadius: 8, padding: '2px 9px', flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}>
+            {fmtDM(d.execDate)}
+          </span>
+          {row2Parts && (
+            <span style={{ fontSize: 14, fontWeight: 600, color: '#555', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {row2Parts}
+            </span>
+          )}
+        </div>
       </div>
     </div>
   )
