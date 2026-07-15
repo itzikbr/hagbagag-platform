@@ -3,23 +3,68 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth, useIsAdmin } from '../hooks/useAuth'
 
+// ── טיפוסים ────────────────────────────────────────────────────
+interface BuildingRow { work_content?: { details?: { customerName?: string; address?: string; orderNumber?: string } } }
 interface SheetRow {
   id: string
   project_name: string
-  sheet_date: string | null
-  status: 'field' | 'in_progress' | 'submitted' | null
-  order_number: string | null
-  customer_code: string | null
-  filled_by_name: string
-  recommended_team: string | null
-  num_buildings: number
-  created_at: string
+  archived: boolean
+  progress_data: { execution_date?: string; team_lead?: string; subcontractor?: string } | null
+  buildings: BuildingRow[] | null
+}
+interface DecoratedSheet {
+  id: string
+  name: string
+  address: string
+  orderNumber: string
+  execDate: Date | null
+  execMs: number
+  when: 'past' | 'today' | 'future' | 'none'
+  teamLead: string
+  subcontractor: string
+}
+type View = 'active' | 'archived'
+
+const RED = '#CC0000'
+const BLUE = '#1A5FAD'
+const GREY = '#8696A0'
+
+// ── עזרי תאריך/שם ──────────────────────────────────────────────
+function parseExec(s?: string): Date | null {
+  if (!s) return null
+  const d = new Date(`${s}T00:00:00`)
+  return isNaN(d.getTime()) ? null : d
+}
+function todayMidnight(): Date {
+  const n = new Date()
+  return new Date(n.getFullYear(), n.getMonth(), n.getDate())
+}
+function whenOf(d: Date | null, today: Date): DecoratedSheet['when'] {
+  if (!d) return 'none'
+  const t = d.getTime()
+  if (t === today.getTime()) return 'today'
+  return t < today.getTime() ? 'past' : 'future'
+}
+function fmtDM(d: Date | null): string {
+  return d ? `${d.getDate()}.${d.getMonth() + 1}` : '—'
+}
+// קיצור שם: יותר מ-2 לקוחות (מופרדים בפסיק) → "הלקוח הראשון ועוד";
+// אחרת, יותר מ-2 מילים → השם הפרטי הראשון בלבד; אחרת השם המלא.
+function shortName(name: string): string {
+  const clean = (name || '').trim()
+  const customers = clean.split(',').map(s => s.trim()).filter(Boolean)
+  if (customers.length > 2) return `${customers[0]} ועוד`
+  const words = clean.split(/\s+/).filter(Boolean)
+  if (words.length > 2) return words[0]
+  return clean
 }
 
-const STATUS_META: Record<string, { label: string; bg: string; color: string }> = {
-  field:       { label: 'בשטח',   bg: '#FDECEC', color: '#CC0000' },
-  in_progress: { label: 'בעבודה', bg: '#FFF4E5', color: '#B26A00' },
-  submitted:   { label: 'הוגש',   bg: '#E8F5E9', color: '#2E7D32' },
+// ── צבעי תגית תאריך ────────────────────────────────────────────
+const BADGE: Record<DecoratedSheet['when'], { bg: string; color: string }> = {
+  past:   { bg: '#F5EFEF', color: RED },
+  today:  { bg: RED,       color: '#fff' },
+  future: { bg: '#EEF2FF', color: BLUE },
+  none:   { bg: '#EEE',    color: GREY },
 }
 
 export default function ExecutionSheetsList() {
@@ -30,47 +75,33 @@ export default function ExecutionSheetsList() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
+  const [view, setView] = useState<View>('active')
 
-  // מונה בקשות שהתחילו — משמש לזיהוי "מי הבקשה האחרונה".
   const reqSeq = useRef(0)
-  // ה-seq של התוצאה האחרונה שכבר הוחלה ל-state — תוצאה ישנה יותר לא תדרוס טרייה,
-  // אך תוצאה מוצלחת כן מוחלת גם אם בקשת רקע מאוחרת יותר עדיין רצה/נכשלה.
   const appliedSeq = useRef(0)
-  // האם כבר הצגנו נתונים בהצלחה פעם אחת — שגיאת רקע לא תדרוס נתונים קיימים.
   const loadedOnce = useRef(false)
-  // מונע setState אחרי unmount.
   const aliveRef = useRef(true)
-  // הטעינה הראשונית הסתיימה — רק אז מפעילים רענון-בחזרה (מונע מרוץ עם ה-mount).
   const initialDoneRef = useRef(false)
+  const listRef = useRef<HTMLDivElement>(null)
+  const didScrollRef = useRef<string>('')   // אחרון שגללנו אליו: view
 
   useEffect(() => {
     aliveRef.current = true
     loadSheets()
 
-    // Race condition: חוזרים לרשימה מיד אחרי navigate מדף שנשמר, והשורה
-    // החדשה עלולה לא להופיע עדיין (replication lag / commit שטרם נראה).
-    // טעינה חוזרת אחרי 500ms תופסת את הדף שזה עתה נשמר — כרענון רקע, בלי ספינר.
+    // רענון רקע קצר אחרי mount — תופס דף שזה עתה נשמר (replication lag).
     const raceTimer = setTimeout(() => loadSheets({ background: true }), 500)
 
-    // Realtime — refresh when a sheet is added/changed.
-    // שם ערוץ ייחודי לכל mount: מונע התנגשות topic כשחוזרים לרשימה מיד אחרי
-    // סגירת דף (ה-unmount הקודם עדיין משחרר את הערוץ), שהייתה תוקעת את ה-resubscribe.
+    // Realtime — רענון כשדף נוסף/משתנה/מאורכב.
     const channel = supabase
       .channel(`execution-sheets-list-${reqSeq.current}-${Math.random().toString(36).slice(2)}`)
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'execution_sheets',
-      }, () => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'execution_sheets' }, () => {
         loadSheets({ background: true })
       })
       .subscribe()
 
-    // רענון בכל חזרה למסך: כשה-PWA/טאב חוזר לחזית או מ-bfcache, הרכיב לא בהכרח
-    // עובר mount מחדש (ואז ה-fetch של ה-mount לא רץ) — האזנה ל-visibility/focus/
-    // pageshow מבטיחה fetch טרי בכל פעם שהמשתמש חוזר לרשימה. רענון רקע (בלי ספינר).
+    // רענון בכל חזרה למסך (PWA/טאב/bfcache) — רק אחרי הטעינה הראשונית.
     const refreshOnReturn = () => {
-      // רק אחרי שהטעינה הראשונית הסתיימה — כדי לא להתחרות ב-fetch של ה-mount
       if (initialDoneRef.current && document.visibilityState === 'visible') loadSheets({ background: true })
     }
     document.addEventListener('visibilitychange', refreshOnReturn)
@@ -87,27 +118,17 @@ export default function ExecutionSheetsList() {
     }
   }, [])
 
-  // background=true → רענון שקט: לא מדליק את מסך הטעינה ולא מציג שגיאה על נתונים קיימים.
-  // background=false → טעינה יזומה (mount / "נסה שוב") שמציגה ספינר.
   async function loadSheets({ background = false }: { background?: boolean } = {}) {
     const seq = ++reqSeq.current
-    if (!background) {
-      setLoading(true)
-      setError(null)
-    }
+    if (!background) { setLoading(true); setError(null) }
 
-    // Guard against a request/session-refresh that never settles (seen on iOS PWA,
-    // where supabase-js can stall on the auth lock and the query promise hangs forever).
-    // Without this the page would sit on "טוען דפי ביצוע..." indefinitely.
     let timer: ReturnType<typeof setTimeout> | undefined
-    const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error('timeout')), 12000)
-    })
+    const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('timeout')), 12000) })
 
     try {
       const query = supabase
         .from('execution_sheets')
-        .select('id, project_name, sheet_date, status, order_number, customer_code, filled_by_name, recommended_team, num_buildings, created_at')
+        .select('id, project_name, archived, progress_data, buildings(work_content)')
         .order('created_at', { ascending: false })
 
       const { data, error } = await Promise.race([query, timeout]) as
@@ -117,11 +138,8 @@ export default function ExecutionSheetsList() {
 
       if (error) {
         console.error('[sheets] query error:', error)
-        // שגיאה מוצגת רק אם עדיין אין נתונים כלל, ורק לבקשה האחרונה שהתחילה.
         if (!loadedOnce.current && seq === reqSeq.current) setError('שגיאה בטעינת דפי הביצוע')
       } else if (seq > appliedSeq.current) {
-        // מחילים כל תוצאה מוצלחת שטרייה יותר מזו שכבר הוחלה — כך תוצאה טובה
-        // מוקדמת לא הולכת לאיבוד גם אם בקשת רקע מאוחרת יותר עדיין רצה/נכשלת.
         appliedSeq.current = seq
         setSheets((data ?? []) as SheetRow[])
         setError(null)
@@ -129,14 +147,11 @@ export default function ExecutionSheetsList() {
       }
     } catch (e) {
       console.error('[sheets] loadSheets failed:', e)
-      // רק אם מעולם לא הצלחנו לטעון (ולבקשה האחרונה) מציגים שגיאה.
       if (aliveRef.current && !loadedOnce.current && seq === reqSeq.current) {
         setError('לא הצלחנו לטעון את דפי הביצוע. בדוק את החיבור ונסה שוב.')
       }
     } finally {
       clearTimeout(timer)
-      // הספינר נכבה תמיד: כשהבקשה האחרונה שהתחילה הסתיימה, או ברגע שיש נתונים
-      // כלשהם להציג — כך הוא לעולם לא נתקע על "טוען דפי ביצוע..." לצמיתות.
       if (aliveRef.current && (seq === reqSeq.current || loadedOnce.current)) {
         setLoading(false)
         initialDoneRef.current = true
@@ -144,21 +159,24 @@ export default function ExecutionSheetsList() {
     }
   }
 
-  async function deleteSheet(sheet: SheetRow) {
-    if (!window.confirm(`למחוק את "${sheet.project_name}"? פעולה זו אינה הפיכה.`)) return
-    // מסירים מיד מהתצוגה (optimistic), ומחזירים אם המחיקה נכשלה
+  // ── פעולות ───────────────────────────────────────────────────
+  async function archiveSheet(id: string) {
+    if (!window.confirm('להעביר לארכיון?')) return
+    setSheets(cur => cur.map(s => (s.id === id ? { ...s, archived: true } : s)))
+    const { error } = await supabase.from('execution_sheets').update({ archived: true }).eq('id', id)
+    if (error) {
+      console.error('[sheets] archive failed:', error)
+      alert('העברה לארכיון נכשלה. נסה שוב.')
+      setSheets(cur => cur.map(s => (s.id === id ? { ...s, archived: false } : s)))
+    }
+  }
+
+  async function deleteSheet(id: string) {
+    if (!window.confirm('למחוק לצמיתות?')) return
     const prev = sheets
-    setSheets(cur => cur.filter(s => s.id !== sheet.id))
-    // מוחקים תחילה מבנים תלויים (FK) ואז את הדף
-    await supabase.from('buildings').delete().eq('sheet_id', sheet.id)
-    // .select() מחזיר את השורות שנמחקו בפועל. חשוב: אם RLS חוסם מחיקה,
-    // supabase מחזיר error=null אבל 0 שורות — לכן בודקים גם שהשורה אכן נמחקה,
-    // אחרת "מחיקה" מדומה תיראה כהצלחה והדף יחזור אחרי רענון.
-    const { data, error } = await supabase
-      .from('execution_sheets')
-      .delete()
-      .eq('id', sheet.id)
-      .select('id')
+    setSheets(cur => cur.filter(s => s.id !== id))
+    await supabase.from('buildings').delete().eq('sheet_id', id)
+    const { data, error } = await supabase.from('execution_sheets').delete().eq('id', id).select('id')
     if (error || !data || data.length === 0) {
       console.error('[sheets] delete failed:', error ?? 'no rows deleted (RLS?)')
       alert('מחיקה נכשלה. נסה שוב.')
@@ -166,42 +184,80 @@ export default function ExecutionSheetsList() {
     }
   }
 
-  const filtered = sheets.filter(s =>
-    s.project_name.toLowerCase().includes(search.toLowerCase()) ||
-    (s.order_number ?? '').toLowerCase().includes(search.toLowerCase()) ||
-    (s.customer_code ?? '').toLowerCase().includes(search.toLowerCase()) ||
-    (s.filled_by_name ?? '').toLowerCase().includes(search.toLowerCase())
-  )
+  // ── גזירת נתונים לתצוגה ───────────────────────────────────────
+  const today = todayMidnight()
+  const decorated: DecoratedSheet[] = sheets
+    .filter(s => !!s.archived === (view === 'archived'))
+    .map(s => {
+      const details = s.buildings?.[0]?.work_content?.details ?? {}
+      const execDate = parseExec(s.progress_data?.execution_date)
+      return {
+        id: s.id,
+        name: s.project_name || details.customerName || 'דף ביצוע',
+        address: details.address ?? '',
+        orderNumber: details.orderNumber ?? '',
+        execDate,
+        execMs: execDate ? execDate.getTime() : Infinity,
+        when: whenOf(execDate, today),
+        teamLead: s.progress_data?.team_lead ?? '',
+        subcontractor: s.progress_data?.subcontractor ?? '',
+      }
+    })
 
+  const q = search.trim().toLowerCase()
+  const filtered = (q
+    ? decorated.filter(d => d.name.toLowerCase().includes(q) || d.orderNumber.toLowerCase().includes(q))
+    : decorated
+  ).sort((a, b) => (a.execMs - b.execMs) || a.name.localeCompare(b.name, 'he'))
+
+  // גלילה כך שהיום/עתיד יופיעו בראש התצוגה (למעלה=עבר, למטה=עתיד). פעם אחת לכל view.
+  useEffect(() => {
+    if (loading) return
+    if (didScrollRef.current === view) return
+    const c = listRef.current
+    if (!c) return
+    const raf = requestAnimationFrame(() => {
+      const cards = c.querySelectorAll('[data-when]')
+      if (!cards.length) return   // עוד אין כרטיסים — ננסה שוב כשיגיעו נתונים
+      const target = c.querySelector('[data-when="today"],[data-when="future"]') as HTMLElement | null
+      if (target) {
+        c.scrollTop += target.getBoundingClientRect().top - c.getBoundingClientRect().top
+      } else {
+        c.scrollTop = c.scrollHeight   // הכול בעבר → העדכני ביותר בתחתית
+      }
+      didScrollRef.current = view
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [view, loading, sheets])
+
+  // ── UI ────────────────────────────────────────────────────────
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
       {/* Header */}
       <div style={{
-        background: '#CC0000',
-        padding: '12px 16px 8px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        flexShrink: 0,
-        position: 'relative',
+        background: RED, padding: '12px 16px 8px', display: 'flex', alignItems: 'center',
+        justifyContent: 'center', flexShrink: 0, position: 'relative',
       }}>
+        {view === 'archived' ? (
+          <button onClick={() => setView('active')} title="חזרה"
+            style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#fff', fontSize: 15, fontWeight: 700, fontFamily: 'inherit' }}>
+            → חזרה
+          </button>
+        ) : (
+          <button onClick={() => setView('archived')} title="ארכיון"
+            style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', background: 'rgba(255,255,255,0.15)', border: 'none', cursor: 'pointer', color: '#fff', fontSize: 13, fontWeight: 700, borderRadius: 14, padding: '5px 12px', fontFamily: 'inherit' }}>
+            📦 ארכיון
+          </button>
+        )}
+
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', lineHeight: 1.15 }}>
-          <span style={{ color: '#fff', fontSize: 20, fontWeight: 700 }}>דפי ביצוע</span>
-          <span style={{ color: 'rgba(255,255,255,0.85)', fontSize: 12, fontWeight: 400 }}>
-            חג בגג
-          </span>
+          <span style={{ color: '#fff', fontSize: 20, fontWeight: 700 }}>{view === 'archived' ? 'ארכיון' : 'דפי ביצוע'}</span>
+          <span style={{ color: 'rgba(255,255,255,0.85)', fontSize: 12, fontWeight: 400 }}>חג בגג</span>
         </div>
-        {/* כפתור יציאה — למשתמש שאינו אדמין אין ניווט תחתון, אז זו דרך היציאה היחידה */}
-        {!isAdmin && (
-          <button
-            onClick={async () => { await logout(); navigate('/login', { replace: true }) }}
-            title="יציאה"
-            style={{
-              position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)',
-              background: 'none', border: 'none', cursor: 'pointer', padding: 6,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}
-          >
+
+        {view === 'active' && !isAdmin && (
+          <button onClick={async () => { await logout(); navigate('/login', { replace: true }) }} title="יציאה"
+            style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', padding: 6, display: 'flex', alignItems: 'center' }}>
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
               <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
               <path d="M16 17l5-5-5-5M21 12H9" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
@@ -212,86 +268,44 @@ export default function ExecutionSheetsList() {
 
       {/* Search */}
       <div style={{ background: '#fff', padding: '6px 12px', flexShrink: 0 }}>
-        <div style={{
-          background: '#F0F2F5',
-          borderRadius: 8,
-          display: 'flex',
-          alignItems: 'center',
-          padding: '6px 12px',
-          gap: 8,
-        }}>
+        <div style={{ background: '#F0F2F5', borderRadius: 8, display: 'flex', alignItems: 'center', padding: '6px 12px', gap: 8 }}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
             <circle cx="11" cy="11" r="8" stroke="#8696A0" strokeWidth="2"/>
             <path d="M21 21L16.65 16.65" stroke="#8696A0" strokeWidth="2"/>
           </svg>
-          <input
-            type="text"
-            placeholder="חיפוש דף ביצוע"
-            value={search}
+          <input type="text" placeholder="חיפוש לפי שם לקוח או מספר הזמנה" value={search}
             onChange={e => setSearch(e.target.value)}
-            style={{
-              border: 'none', background: 'none', outline: 'none',
-              fontSize: 15, color: '#111', width: '100%', direction: 'rtl',
-            }}
-          />
+            style={{ border: 'none', background: 'none', outline: 'none', fontSize: 15, color: '#111', width: '100%', direction: 'rtl' }} />
         </div>
       </div>
 
-      {/* Sheets list */}
-      <div style={{ flex: 1, overflowY: 'auto', background: '#fff' }} className="no-scrollbar">
-        {loading && (
-          <div style={{ padding: 24, textAlign: 'center', color: '#8696A0' }}>
-            טוען דפי ביצוע...
-          </div>
-        )}
+      {/* List */}
+      <div ref={listRef} style={{ flex: 1, overflowY: 'auto', background: '#fff' }} className="no-scrollbar">
+        {loading && <div style={{ padding: 24, textAlign: 'center', color: GREY }}>טוען דפי ביצוע...</div>}
 
         {!loading && error && (
-          <div style={{
-            display: 'flex', flexDirection: 'column', alignItems: 'center',
-            justifyContent: 'center', gap: 12, padding: 32, textAlign: 'center',
-          }}>
-            <p style={{ fontSize: 15, color: '#CC0000', margin: 0, lineHeight: 1.5 }}>{error}</p>
-            <button
-              onClick={() => loadSheets()}
-              style={{
-                background: '#CC0000', color: '#fff', border: 'none',
-                borderRadius: 24, padding: '10px 22px', cursor: 'pointer',
-                fontSize: 15, fontWeight: 600, direction: 'rtl',
-              }}
-            >
-              נסה שוב
-            </button>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: 32, textAlign: 'center' }}>
+            <p style={{ fontSize: 15, color: RED, margin: 0, lineHeight: 1.5 }}>{error}</p>
+            <button onClick={() => loadSheets()} style={{ background: RED, color: '#fff', border: 'none', borderRadius: 24, padding: '10px 22px', cursor: 'pointer', fontSize: 15, fontWeight: 600 }}>נסה שוב</button>
           </div>
         )}
 
         {!loading && !error && filtered.length === 0 && (
-          <EmptyState hasSearch={search.length > 0} onCreate={() => navigate('/sheets/new')} />
+          <EmptyState view={view} hasSearch={q.length > 0} onCreate={() => navigate('/sheets/new')} />
         )}
 
-        {!loading && !error && filtered.map(sheet => (
-          <SheetItem
-            key={sheet.id}
-            sheet={sheet}
-            onClick={() => navigate(`/sheets/${sheet.id}`)}
-            onView={() => navigate(`/sheets/${sheet.id}/view`)}
-            onDelete={() => deleteSheet(sheet)}
-          />
+        {!loading && !error && filtered.map((d, i) => (
+          <SheetCard key={d.id} d={d} index={i} view={view}
+            onOpen={() => navigate(`/sheets/${d.id}`)}
+            onArchive={() => archiveSheet(d.id)}
+            onDelete={() => deleteSheet(d.id)} />
         ))}
       </div>
 
-      {/* FAB — new sheet (UI only) */}
-      {!loading && filtered.length > 0 && (
-        <button
-          onClick={() => navigate('/sheets/new')}
-          style={{
-            position: 'fixed', bottom: 72, left: 16,
-            width: 56, height: 56, borderRadius: '50%',
-            background: '#CC0000', border: 'none', cursor: 'pointer',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.3)', zIndex: 10,
-          }}
-          title="דף ביצוע חדש"
-        >
+      {/* FAB — new sheet (active view only) */}
+      {view === 'active' && !loading && filtered.length > 0 && (
+        <button onClick={() => navigate('/sheets/new')} title="דף ביצוע חדש"
+          style={{ position: 'fixed', bottom: 72, left: 16, width: 56, height: 56, borderRadius: '50%', background: RED, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 12px rgba(0,0,0,0.3)', zIndex: 10 }}>
           <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
             <line x1="12" y1="5" x2="12" y2="19" stroke="#fff" strokeWidth="2.5" strokeLinecap="round"/>
             <line x1="5" y1="12" x2="19" y2="12" stroke="#fff" strokeWidth="2.5" strokeLinecap="round"/>
@@ -302,189 +316,83 @@ export default function ExecutionSheetsList() {
   )
 }
 
-function EmptyState({ hasSearch, onCreate }: { hasSearch: boolean; onCreate: () => void }) {
+// ── כרטיס דף ──────────────────────────────────────────────────
+function SheetCard({ d, index, view, onOpen, onArchive, onDelete }: {
+  d: DecoratedSheet; index: number; view: View
+  onOpen: () => void; onArchive: () => void; onDelete: () => void
+}) {
+  const bg = d.when === 'today' ? '#FFF0EE' : (index % 2 === 0 ? '#fff' : '#FAF8F6')
+  const badge = BADGE[d.when]
+  const title = d.address ? `${shortName(d.name)} · ${d.address}` : shortName(d.name)
+  const row2Parts = [d.subcontractor, d.teamLead].filter(Boolean).join(' · ')
+
   return (
-    <div style={{
-      display: 'flex', flexDirection: 'column', alignItems: 'center',
-      justifyContent: 'center', height: '100%', gap: 16, padding: 32,
-      textAlign: 'center',
+    <div onClick={onOpen} style={{
+      background: bg, borderBottom: '1px solid #F0F2F5', padding: '12px 16px',
+      cursor: 'pointer', userSelect: 'none', direction: 'rtl',
     }}>
-      <div style={{
-        width: 80, height: 80, borderRadius: 20,
-        background: '#CC0000',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        boxShadow: '0 4px 16px rgba(204,0,0,0.3)',
-      }}>
-        <svg width="40" height="40" viewBox="0 0 24 24" fill="none">
-          <rect x="3" y="3" width="18" height="18" rx="2" stroke="#fff" strokeWidth="1.8" fill="none"/>
-          <line x1="3" y1="9" x2="21" y2="9" stroke="#fff" strokeWidth="1.4"/>
-          <line x1="3" y1="15" x2="21" y2="15" stroke="#fff" strokeWidth="1.4"/>
-          <line x1="9" y1="3" x2="9" y2="21" stroke="#fff" strokeWidth="1.4"/>
-        </svg>
+      {/* Row 1 */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <span style={{ flex: 1, minWidth: 0, fontSize: 17, fontWeight: 900, color: '#111', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {title}
+        </span>
+        {view === 'active' ? (
+          <button onClick={e => { e.stopPropagation(); onArchive() }} title="ארכב"
+            style={iconBtn}>📦</button>
+        ) : (
+          <button onClick={e => { e.stopPropagation(); onDelete() }} title="מחק לצמיתות"
+            style={iconBtn}>🗑️</button>
+        )}
       </div>
 
+      {/* Row 2 */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
+        <span style={{ fontSize: 14, fontWeight: 700, background: badge.bg, color: badge.color, borderRadius: 8, padding: '2px 9px', flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}>
+          {fmtDM(d.execDate)}
+        </span>
+        {row2Parts && (
+          <span style={{ fontSize: 14, fontWeight: 600, color: '#555', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {row2Parts}
+          </span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+const iconBtn: React.CSSProperties = {
+  flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer',
+  fontSize: 20, lineHeight: 1, padding: 4, fontFamily: 'inherit',
+}
+
+// ── מצב ריק ───────────────────────────────────────────────────
+function EmptyState({ view, hasSearch, onCreate }: { view: View; hasSearch: boolean; onCreate: () => void }) {
+  const archived = view === 'archived'
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 16, padding: 32, textAlign: 'center' }}>
+      <div style={{ width: 80, height: 80, borderRadius: 20, background: RED, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 16px rgba(204,0,0,0.3)', fontSize: 38 }}>
+        {archived ? '📦' : (
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none">
+            <rect x="3" y="3" width="18" height="18" rx="2" stroke="#fff" strokeWidth="1.8" fill="none"/>
+            <line x1="3" y1="9" x2="21" y2="9" stroke="#fff" strokeWidth="1.4"/>
+            <line x1="3" y1="15" x2="21" y2="15" stroke="#fff" strokeWidth="1.4"/>
+            <line x1="9" y1="3" x2="9" y2="21" stroke="#fff" strokeWidth="1.4"/>
+          </svg>
+        )}
+      </div>
       <h2 style={{ fontSize: 22, fontWeight: 700, color: '#111', margin: 0 }}>
-        {hasSearch ? 'לא נמצאו תוצאות' : 'אין דפי ביצוע עדיין'}
+        {hasSearch ? 'לא נמצאו תוצאות' : archived ? 'הארכיון ריק' : 'אין דפי ביצוע עדיין'}
       </h2>
-      <p style={{ fontSize: 15, color: '#8696A0', margin: 0, lineHeight: 1.5 }}>
-        {hasSearch
-          ? 'נסה מונח חיפוש אחר.'
+      <p style={{ fontSize: 15, color: GREY, margin: 0, lineHeight: 1.5 }}>
+        {hasSearch ? 'נסה מונח חיפוש אחר.'
+          : archived ? 'דפים שתעביר לארכיון יופיעו כאן.'
           : 'צור דף ביצוע חדש כדי לנהל פרויקטים, מבנים וחומרים בשטח.'}
       </p>
-
-      {!hasSearch && (
-        <button
-          onClick={onCreate}
-          style={{
-            marginTop: 8,
-            background: '#CC0000', color: '#fff', border: 'none',
-            borderRadius: 24, padding: '12px 24px', cursor: 'pointer',
-            fontSize: 16, fontWeight: 600, direction: 'rtl',
-            boxShadow: '0 2px 8px rgba(204,0,0,0.3)',
-          }}
-        >
+      {!hasSearch && !archived && (
+        <button onClick={onCreate} style={{ marginTop: 8, background: RED, color: '#fff', border: 'none', borderRadius: 24, padding: '12px 24px', cursor: 'pointer', fontSize: 16, fontWeight: 600, direction: 'rtl', boxShadow: '0 2px 8px rgba(204,0,0,0.3)' }}>
           ＋ דף ביצוע חדש
         </button>
       )}
     </div>
   )
-}
-
-const ACTION_W = 84   // רוחב כפתור הפעולה שנחשף
-const THRESHOLD = 60  // מרחק גרירה מינימלי כדי לחשוף פעולה
-
-function SheetItem({ sheet, onClick, onView, onDelete }: {
-  sheet: SheetRow; onClick: () => void; onView: () => void; onDelete: () => void
-}) {
-  const status = STATUS_META[sheet.status ?? 'field'] ?? STATUS_META.field
-  const subtitleParts = [
-    sheet.order_number ? `הזמנה ${sheet.order_number}` : null,
-    sheet.customer_code ? `לקוח ${sheet.customer_code}` : null,
-    sheet.num_buildings ? `${sheet.num_buildings} מבנים` : null,
-  ].filter(Boolean)
-
-  // offset שלילי = החלקה שמאלה (חושף מחיקה בצד ימין); חיובי = החלקה ימינה (חושף צפייה בצד שמאל)
-  const [offset, setOffset] = useState(0)
-  const [dragging, setDragging] = useState(false)
-  const startX = useRef(0)
-  const startOffset = useRef(0)
-  const moved = useRef(false)
-
-  function onTouchStart(e: React.TouchEvent) {
-    startX.current = e.touches[0].clientX
-    startOffset.current = offset
-    moved.current = false
-    setDragging(true)
-  }
-  function onTouchMove(e: React.TouchEvent) {
-    const dx = e.touches[0].clientX - startX.current
-    if (Math.abs(dx) > 6) moved.current = true
-    let next = startOffset.current + dx
-    // מגבילים לטווח [-ACTION_W, +ACTION_W] עם התנגדות קלה מעבר לכך
-    if (next > ACTION_W) next = ACTION_W + (next - ACTION_W) * 0.3
-    if (next < -ACTION_W) next = -ACTION_W + (next + ACTION_W) * 0.3
-    setOffset(next)
-  }
-  function onTouchEnd() {
-    setDragging(false)
-    if (offset <= -THRESHOLD) setOffset(-ACTION_W)       // נעילה על חשיפת "מחק"
-    else if (offset >= THRESHOLD) setOffset(ACTION_W)    // נעילה על חשיפת "צפייה"
-    else setOffset(0)                                    // חזרה למקום
-  }
-  function handleClick() {
-    // אם השורה פתוחה או בוצעה גרירה — קליק סוגר במקום לנווט
-    if (offset !== 0) { setOffset(0); return }
-    if (moved.current) return
-    onClick()
-  }
-
-  const transition = dragging ? 'none' : 'transform 0.2s ease'
-
-  return (
-    <div style={{ position: 'relative', overflow: 'hidden', borderBottom: '1px solid #F0F2F5', background: '#fff' }}>
-      {/* פעולת מחיקה — נחשפת בצד ימין בהחלקה שמאלה */}
-      <button
-        type="button"
-        onClick={onDelete}
-        style={{
-          position: 'absolute', top: 0, bottom: 0, right: 0, width: ACTION_W,
-          background: '#CC0000', color: '#fff', border: 'none',
-          fontSize: 15, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
-          display: offset < 0 ? 'flex' : 'none', alignItems: 'center', justifyContent: 'center',
-        }}
-      >מחק</button>
-      {/* פעולת צפייה — נחשפת בצד שמאל בהחלקה ימינה */}
-      <button
-        type="button"
-        onClick={() => { setOffset(0); onView() }}
-        style={{
-          position: 'absolute', top: 0, bottom: 0, left: 0, width: ACTION_W,
-          background: '#1A5FAD', color: '#fff', border: 'none',
-          fontSize: 15, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
-          display: offset > 0 ? 'flex' : 'none', alignItems: 'center', justifyContent: 'center',
-        }}
-      >צפייה</button>
-
-    <div
-      onClick={handleClick}
-      onTouchStart={onTouchStart}
-      onTouchMove={onTouchMove}
-      onTouchEnd={onTouchEnd}
-      style={{
-        display: 'flex', alignItems: 'center', padding: '12px 16px',
-        gap: 12, cursor: 'pointer',
-        background: '#fff', userSelect: 'none',
-        transform: `translateX(${offset}px)`, transition, position: 'relative',
-      }}
-    >
-      {/* Sheet icon */}
-      <div style={{
-        width: 46, height: 46, borderRadius: 12, flexShrink: 0,
-        background: '#FDECEC',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-      }}>
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-          <rect x="4" y="3" width="16" height="18" rx="2" stroke="#CC0000" strokeWidth="1.8" fill="none"/>
-          <line x1="8" y1="8" x2="16" y2="8" stroke="#CC0000" strokeWidth="1.4"/>
-          <line x1="8" y1="12" x2="16" y2="12" stroke="#CC0000" strokeWidth="1.4"/>
-          <line x1="8" y1="16" x2="13" y2="16" stroke="#CC0000" strokeWidth="1.4"/>
-        </svg>
-      </div>
-
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2, gap: 8 }}>
-          <span style={{
-            fontWeight: 600, fontSize: 16, color: '#111',
-            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          }}>
-            {sheet.project_name}
-          </span>
-          <span style={{
-            fontSize: 11, fontWeight: 600, color: status.color, background: status.bg,
-            borderRadius: 10, padding: '2px 8px', flexShrink: 0,
-          }}>
-            {status.label}
-          </span>
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-          <span style={{
-            fontSize: 13, color: '#8696A0',
-            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          }}>
-            {subtitleParts.join(' · ') || (sheet.filled_by_name || 'ללא פרטים')}
-          </span>
-          <span style={{ fontSize: 12, color: '#8696A0', flexShrink: 0 }}>
-            {formatDate(sheet.sheet_date ?? sheet.created_at)}
-          </span>
-        </div>
-      </div>
-    </div>
-    </div>
-  )
-}
-
-function formatDate(isoStr: string): string {
-  const d = new Date(isoStr)
-  if (isNaN(d.getTime())) return ''
-  return d.toLocaleDateString('he-IL', { day: 'numeric', month: 'numeric', year: '2-digit' })
 }
