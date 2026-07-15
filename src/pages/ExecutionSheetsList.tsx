@@ -321,7 +321,7 @@ function SheetCard({ d, index, view, onOpen, onArchive, onDelete }: {
   d: DecoratedSheet; index: number; view: View
   onOpen: () => void; onArchive: () => void; onDelete: () => void
 }) {
-  const bg = d.when === 'today' ? '#FFF0EE' : (index % 2 === 0 ? '#fff' : '#FAF8F6')
+  const bg = d.when === 'today' ? '#FFF0EE' : (index % 2 === 0 ? '#ffffff' : '#F5F2EF')
   const badge = BADGE[d.when]
   const title = d.address ? `${shortName(d.name)} · ${d.address}` : shortName(d.name)
   const row2Parts = [d.subcontractor, d.teamLead].filter(Boolean).join(' · ')
