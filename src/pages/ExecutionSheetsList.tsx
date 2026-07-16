@@ -267,15 +267,18 @@ export default function ExecutionSheetsList() {
       </div>
 
       {/* Search */}
-      <div style={{ background: '#fff', padding: '6px 12px', flexShrink: 0 }}>
-        <div style={{ background: '#F0F2F5', borderRadius: 8, display: 'flex', alignItems: 'center', padding: '6px 12px', gap: 8 }}>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+      <div style={{ background: '#fff', padding: '10px 12px', flexShrink: 0 }}>
+        <div style={{
+          maxWidth: 600, margin: '0 auto', height: 44, background: '#F4F1EE', borderRadius: 12,
+          border: `2px solid #D8CFC8`, display: 'flex', alignItems: 'center', padding: '0 14px', gap: 10,
+        }}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0 }}>
             <circle cx="11" cy="11" r="8" stroke="#8696A0" strokeWidth="2"/>
             <path d="M21 21L16.65 16.65" stroke="#8696A0" strokeWidth="2"/>
           </svg>
           <input type="text" placeholder="חיפוש לפי שם לקוח או מספר הזמנה" value={search}
             onChange={e => setSearch(e.target.value)}
-            style={{ border: 'none', background: 'none', outline: 'none', fontSize: 15, color: '#111', width: '100%', direction: 'rtl' }} />
+            style={{ border: 'none', background: 'none', outline: 'none', fontSize: 16, fontWeight: 600, color: '#111', width: '100%', height: '100%', direction: 'rtl' }} />
         </div>
       </div>
 
@@ -396,15 +399,12 @@ function SheetCard({ d, index, view, onOpen, onView, onArchive, onDelete }: {
           background: bg, padding: '6px 16px', cursor: 'pointer', userSelect: 'none', direction: 'rtl',
           transform: `translateX(${offset}px)`, transition, position: 'relative',
         }}>
-        {/* Row 1 */}
+        {/* Row 1 — פעולת ארכוב נעשית בהחלקה בלבד; בארכיון נשאר 🗑️ מחיקה */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <span style={{ flex: 1, minWidth: 0, fontSize: 17, fontWeight: 900, color: '#111', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {title}
           </span>
-          {view === 'active' ? (
-            <button onClick={e => { e.stopPropagation(); onArchive() }} title="ארכב"
-              style={iconBtn}>📦</button>
-          ) : (
+          {view === 'archived' && (
             <button onClick={e => { e.stopPropagation(); onDelete() }} title="מחק לצמיתות"
               style={iconBtn}>🗑️</button>
           )}

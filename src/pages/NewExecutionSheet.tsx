@@ -1430,11 +1430,12 @@ export default function NewExecutionSheet() {
       </div>
 
       {/* Tabs */}
-      <div style={{ display: 'flex', background: BG, flexShrink: 0, borderBottom: `1px solid ${BORDER}` }}>
+      <div style={{ display: 'flex', width: '100%', background: '#fff', flexShrink: 0, minHeight: 42, borderBottom: `1px solid ${BORDER}` }}>
         {([['details', 'פרטים'], ['docs', 'תיעוד'], ['materials', 'חומרים'], ['progress', '🚦 התקדמות']] as [TabKey, string][]).map(([key, label]) => (
           <button key={key} onClick={() => setTab(key)} style={{
-            flex: 1, height: 26, border: 'none', background: 'none', cursor: 'pointer', fontFamily: 'inherit',
-            fontSize: 12, fontWeight: tab === key ? 800 : 500, color: tab === key ? RED : '#888',
+            flex: 1, minHeight: 42, border: 'none', background: 'none', cursor: 'pointer', fontFamily: 'inherit',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 13, fontWeight: tab === key ? 800 : 500, color: tab === key ? RED : '#888',
             borderBottom: tab === key ? `2px solid ${RED}` : '2px solid transparent',
             whiteSpace: 'nowrap',
           }}>{label}</button>
