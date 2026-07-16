@@ -175,6 +175,19 @@ export default function ExecutionSheetsList() {
     }
   }
 
+  async function restoreSheet(id: string) {
+    if (!window.confirm('להחזיר לרשימה הפעילה?')) return
+    const prev = sheets
+    setSheets(cur => cur.map(s => (s.id === id ? { ...s, is_archived: false } : s)))
+    const { data, error } = await supabase
+      .from('execution_sheets').update({ is_archived: false }).eq('id', id).select('id')
+    if (error || !data || data.length === 0) {
+      console.error('[sheets] restore failed:', error ?? 'no rows updated (RLS?)')
+      alert('השחזור נכשל. נסה שוב.')
+      setSheets(prev)
+    }
+  }
+
   async function deleteSheet(id: string) {
     if (!window.confirm('למחוק לצמיתות?')) return
     const prev = sheets
@@ -306,6 +319,7 @@ export default function ExecutionSheetsList() {
             onOpen={() => navigate(`/sheets/${d.id}`)}
             onView={() => navigate(`/sheets/${d.id}/view`)}
             onArchive={() => archiveSheet(d.id)}
+            onRestore={() => restoreSheet(d.id)}
             onDelete={() => deleteSheet(d.id)} />
         ))}
       </div>
@@ -328,9 +342,9 @@ export default function ExecutionSheetsList() {
 const ACTION_W = 96   // רוחב כפתור הפעולה שנחשף בהחלקה
 const THRESHOLD = 56  // מרחק גרירה מינימלי לנעילה על פעולה
 
-function SheetCard({ d, index, view, onOpen, onView, onArchive, onDelete }: {
+function SheetCard({ d, index, view, onOpen, onView, onArchive, onRestore, onDelete }: {
   d: DecoratedSheet; index: number; view: View
-  onOpen: () => void; onView: () => void; onArchive: () => void; onDelete: () => void
+  onOpen: () => void; onView: () => void; onArchive: () => void; onRestore: () => void; onDelete: () => void
 }) {
   const bg = d.when === 'today' ? '#FFF0EE' : (index % 2 === 0 ? '#ffffff' : '#F5F2EF')
   const badge = BADGE[d.when]
@@ -374,9 +388,9 @@ function SheetCard({ d, index, view, onOpen, onView, onArchive, onDelete }: {
     setOffset(0)
     if (view === 'active') onArchive(); else onDelete()
   }
-  function rightAction() {  // כחול — צפייה
+  function rightAction() {  // כחול — צפייה (רשימה) / שחזור (ארכיון)
     setOffset(0)
-    onView()
+    if (view === 'archived') onRestore(); else onView()
   }
   const transition = dragging ? 'none' : 'transform 0.2s ease'
 
@@ -396,7 +410,7 @@ function SheetCard({ d, index, view, onOpen, onView, onArchive, onDelete }: {
         background: BLUE, color: '#fff', border: 'none', fontSize: 14, fontWeight: 700,
         cursor: 'pointer', fontFamily: 'inherit', direction: 'rtl',
         display: offset > 0 ? 'flex' : 'none', alignItems: 'center', justifyContent: 'center',
-      }}>צפייה 👁</button>
+      }}>{view === 'archived' ? 'שחזר ↩️' : 'צפייה 👁'}</button>
 
       <div onClick={handleClick} onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}
         style={{
