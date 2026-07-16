@@ -76,6 +76,8 @@ export default function ExecutionSheetsList() {
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [view, setView] = useState<View>('active')
+  const [confirm, setConfirm] = useState<{ message: string; danger: boolean; action: () => void } | null>(null)
+  const askConfirm = (message: string, danger: boolean, action: () => void) => setConfirm({ message, danger, action })
 
   const reqSeq = useRef(0)
   const appliedSeq = useRef(0)
@@ -161,7 +163,6 @@ export default function ExecutionSheetsList() {
 
   // ── פעולות ───────────────────────────────────────────────────
   async function archiveSheet(id: string) {
-    if (!window.confirm('להעביר לארכיון?')) return
     const prev = sheets
     setSheets(cur => cur.map(s => (s.id === id ? { ...s, is_archived: true } : s)))
     // .select() מחזיר את השורות שעודכנו בפועל — אם RLS חוסם, error=null אך 0 שורות,
@@ -176,7 +177,6 @@ export default function ExecutionSheetsList() {
   }
 
   async function restoreSheet(id: string) {
-    if (!window.confirm('להחזיר לרשימה הפעילה?')) return
     const prev = sheets
     setSheets(cur => cur.map(s => (s.id === id ? { ...s, is_archived: false } : s)))
     const { data, error } = await supabase
@@ -189,7 +189,6 @@ export default function ExecutionSheetsList() {
   }
 
   async function deleteSheet(id: string) {
-    if (!window.confirm('למחוק לצמיתות?')) return
     const prev = sheets
     setSheets(cur => cur.filter(s => s.id !== id))
     await supabase.from('buildings').delete().eq('sheet_id', id)
@@ -318,9 +317,9 @@ export default function ExecutionSheetsList() {
           <SheetCard key={d.id} d={d} index={i} view={view}
             onOpen={() => navigate(`/sheets/${d.id}`)}
             onView={() => navigate(`/sheets/${d.id}/view`)}
-            onArchive={() => archiveSheet(d.id)}
-            onRestore={() => restoreSheet(d.id)}
-            onDelete={() => deleteSheet(d.id)} />
+            onArchive={() => askConfirm('להעביר לארכיון?', false, () => archiveSheet(d.id))}
+            onRestore={() => askConfirm('להחזיר לרשימה הפעילה?', false, () => restoreSheet(d.id))}
+            onDelete={() => askConfirm('למחוק את הדף? פעולה זו אינה הפיכה', true, () => deleteSheet(d.id))} />
         ))}
       </div>
 
@@ -334,6 +333,41 @@ export default function ExecutionSheetsList() {
           </svg>
         </button>
       )}
+
+      {confirm && (
+        <ConfirmDialog message={confirm.message} danger={confirm.danger}
+          onCancel={() => setConfirm(null)}
+          onConfirm={() => { const act = confirm.action; setConfirm(null); act() }} />
+      )}
+    </div>
+  )
+}
+
+// ── דיאלוג אישור פשוט (מחליף את window.confirm — אמין יותר ב-PWA של iOS) ──
+function ConfirmDialog({ message, danger, onCancel, onConfirm }: {
+  message: string; danger: boolean; onCancel: () => void; onConfirm: () => void
+}) {
+  return (
+    <div onClick={onCancel} style={{
+      position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.45)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, direction: 'rtl',
+    }}>
+      <div onClick={e => e.stopPropagation()} style={{
+        background: '#fff', borderRadius: 16, padding: '22px 20px 16px', width: '100%', maxWidth: 340,
+        boxShadow: '0 12px 40px rgba(0,0,0,0.25)',
+      }}>
+        <p style={{ margin: '0 0 18px', fontSize: 16, fontWeight: 700, color: '#111', textAlign: 'center', lineHeight: 1.5 }}>{message}</p>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button type="button" onClick={onCancel} style={{
+            flex: 1, padding: 11, borderRadius: 10, border: '1.5px solid #DDD6D0', background: '#fff',
+            color: '#555', fontSize: 15, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
+          }}>ביטול</button>
+          <button type="button" onClick={onConfirm} style={{
+            flex: 1, padding: 11, borderRadius: 10, border: 'none', background: danger ? RED : BLUE,
+            color: '#fff', fontSize: 15, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
+          }}>אישור</button>
+        </div>
+      </div>
     </div>
   )
 }
