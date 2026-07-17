@@ -29,10 +29,10 @@ export default function HubButton() {
         onClick={() => setOpen(true)}
         aria-label="Hub"
         style={{
-          // שמאל-למטה, קטן (44) ומורם (bottom:132) כדי לא לכסות את שדה הקלט של
-          // GeminiChat ולא להתנגש ב-FAB "+" (left:16, bottom:72) של מסכים אחרים.
-          position: 'fixed', bottom: 132, left: 16, width: 44, height: 44, borderRadius: '50%',
-          background: RED, border: 'none', cursor: 'pointer', zIndex: 900,
+          // שמאל-למטה, 120px מהתחתית, קטן (44). z-index גבוה כדי להופיע מעל תוכן
+          // בכל המסכים הראשיים (sheets / chats / ⚡ / ✨).
+          position: 'fixed', bottom: 120, left: 16, width: 44, height: 44, borderRadius: '50%',
+          background: RED, border: 'none', cursor: 'pointer', zIndex: 1000,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
         }}

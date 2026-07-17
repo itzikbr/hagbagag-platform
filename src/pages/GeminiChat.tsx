@@ -54,7 +54,6 @@ export default function GeminiChat() {
   const [listening, setListening] = useState(false)
   const [micNote, setMicNote] = useState<string | null>(null)
   const [pendingImage, setPendingImage] = useState<PendingImage | null>(null)
-  const [copied, setCopied] = useState(false)
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const recognitionRef = useRef<any>(null)
@@ -172,14 +171,6 @@ export default function GeminiChat() {
     } catch { return false }
   }
 
-  // העתקת כל השיחה ללוח
-  const copyAll = async () => {
-    const transcript = messages
-      .map(m => `${m.role === 'user' ? 'אני' : 'Gemini'}: ${m.text}`)
-      .join('\n\n')
-    if (await writeClipboard(transcript)) { setCopied(true); setTimeout(() => setCopied(false), 1600) }
-  }
-
   // העתקת בועת תשובה בודדת
   const copyMsg = async (i: number, txt: string) => {
     if (await writeClipboard(txt)) { setCopiedIdx(i); setTimeout(() => setCopiedIdx(null), 1500) }
@@ -292,25 +283,6 @@ export default function GeminiChat() {
 
         <div ref={bottomRef} />
       </div>
-
-      {/* שורת "העתק הכל" — בתחתית השיחה, רק כשיש הודעות */}
-      {messages.length > 0 && (
-        <div style={{
-          background: '#F0F2F5', borderTop: '1px solid #E4E4E4',
-          display: 'flex', justifyContent: 'center', padding: '6px 12px 0', flexShrink: 0,
-        }}>
-          <button
-            onClick={copyAll}
-            style={{
-              background: 'none', border: 'none', cursor: 'pointer',
-              color: copied ? '#16A34A' : '#54656F', fontSize: 13, fontWeight: 600,
-              display: 'flex', alignItems: 'center', gap: 5, padding: '4px 10px',
-            }}
-          >
-            {copied ? 'הועתק ✓' : '📋 העתק הכל'}
-          </button>
-        </div>
-      )}
 
       {/* תצוגה מקדימה של תמונה שנבחרה, לפני שליחה */}
       {pendingImage && (
