@@ -230,7 +230,7 @@ export default function GeminiChat() {
         </div>
 
         <button
-          onClick={send}
+          onClick={() => send()}
           disabled={!text.trim() || sending}
           style={{
             width: 44, height: 44, borderRadius: '50%',

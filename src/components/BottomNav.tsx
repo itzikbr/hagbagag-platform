@@ -60,17 +60,24 @@ export default function BottomNav({ activeTab, onTabChange }: BottomNavProps) {
     },
     ...(showItzik ? [{
       id: 'itzik' as const,
-      label: '⚡',
+      label: '',
+      // ⚡ כ-SVG חד-צבעי כדי שהצבע (אדום פעיל / אפור לא-פעיל) יחול — אמוג'י מתעלם מ-color
       icon: (active: boolean) => (
-        <span style={{ fontSize: 22, lineHeight: 1, opacity: active ? 1 : 0.55 }}>⚡</span>
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+          <path d="M13 2L4.5 13.5H11L10 22L19.5 10.5H13L13 2Z" fill={active ? '#CC0000' : '#555555'}/>
+        </svg>
       ),
       path: '/itzik',
     }] : []),
     ...(showItzik ? [{
       id: 'gemini' as const,
-      label: '✨',
+      label: '',
+      // ✨ כ-SVG חד-צבעי (כוכב מנצנץ) עם fill לפי מצב פעיל
       icon: (active: boolean) => (
-        <span style={{ fontSize: 22, lineHeight: 1, opacity: active ? 1 : 0.55 }}>✨</span>
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+          <path d="M12 2L13.8 8.2L20 10L13.8 11.8L12 18L10.2 11.8L4 10L10.2 8.2L12 2Z" fill={active ? '#CC0000' : '#555555'}/>
+          <path d="M18.5 3.5L19.2 5.8L21.5 6.5L19.2 7.2L18.5 9.5L17.8 7.2L15.5 6.5L17.8 5.8L18.5 3.5Z" fill={active ? '#CC0000' : '#555555'}/>
+        </svg>
       ),
       path: '/gemini',
     }] : []),
