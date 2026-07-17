@@ -169,9 +169,10 @@ export default function LightningScreen() {
     setLoading(true)
     setError(false)
     setRefreshError(false)
-    // timeout של 120 שניות — הבריף אמור לחזור תוך ~60-90ש'
+    // timeout של 180 שניות — ייצור הבריף נמדד ב-~195ש' (ראה timing בלוגי claude-server),
+    // 120ש' הקודמים גרמו ל-abort בדפדפן לפני שהבריף חזר.
     const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 120000)
+    const timeoutId = setTimeout(() => controller.abort(), 180000)
     try {
       // הקריאה עוברת דרך Caddy: /api/* → claude-server.js (:4000)
       const response = await fetch('/api/chat', {
