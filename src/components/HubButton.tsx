@@ -29,13 +29,15 @@ export default function HubButton() {
         onClick={() => setOpen(true)}
         aria-label="Hub"
         style={{
-          position: 'fixed', bottom: 72, right: 16, width: 56, height: 56, borderRadius: '50%',
+          // שמאל-למטה, קטן (44) ומורם (bottom:132) כדי לא לכסות את שדה הקלט של
+          // GeminiChat ולא להתנגש ב-FAB "+" (left:16, bottom:72) של מסכים אחרים.
+          position: 'fixed', bottom: 132, left: 16, width: 44, height: 44, borderRadius: '50%',
           background: RED, border: 'none', cursor: 'pointer', zIndex: 900,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
         }}
       >
-        <svg width="26" height="26" viewBox="0 0 24 24" fill="none">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
           <circle cx="6" cy="6" r="2.4" fill="#fff" />
           <circle cx="12" cy="6" r="2.4" fill="#fff" />
           <circle cx="18" cy="6" r="2.4" fill="#fff" />

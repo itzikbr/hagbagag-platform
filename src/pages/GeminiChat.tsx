@@ -55,6 +55,7 @@ export default function GeminiChat() {
   const [micNote, setMicNote] = useState<string | null>(null)
   const [pendingImage, setPendingImage] = useState<PendingImage | null>(null)
   const [copied, setCopied] = useState(false)
+  const [copiedIdx, setCopiedIdx] = useState<number | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const recognitionRef = useRef<any>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -160,21 +161,28 @@ export default function GeminiChat() {
     }
   }
 
+  // כתיבה ללוח עם fallback ל-execCommand. מחזיר האם הצליח.
+  const writeClipboard = async (str: string): Promise<boolean> => {
+    try {
+      if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(str); return true }
+      const ta = document.createElement('textarea')
+      ta.value = str; ta.style.position = 'fixed'; ta.style.opacity = '0'
+      document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta)
+      return true
+    } catch { return false }
+  }
+
   // העתקת כל השיחה ללוח
   const copyAll = async () => {
     const transcript = messages
       .map(m => `${m.role === 'user' ? 'אני' : 'Gemini'}: ${m.text}`)
       .join('\n\n')
-    try {
-      if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(transcript)
-      else {
-        const ta = document.createElement('textarea')
-        ta.value = transcript; ta.style.position = 'fixed'; ta.style.opacity = '0'
-        document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta)
-      }
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1600)
-    } catch { /* noop */ }
+    if (await writeClipboard(transcript)) { setCopied(true); setTimeout(() => setCopied(false), 1600) }
+  }
+
+  // העתקת בועת תשובה בודדת
+  const copyMsg = async (i: number, txt: string) => {
+    if (await writeClipboard(txt)) { setCopiedIdx(i); setTimeout(() => setCopiedIdx(null), 1500) }
   }
 
   return (
@@ -230,6 +238,21 @@ export default function GeminiChat() {
                   }}>
                     {m.text}
                   </span>
+                )}
+                {/* כפתור העתקה בכל בועת תשובה של Gemini */}
+                {!isMine && m.text && (
+                  <div style={{ display: 'flex', justifyContent: 'flex-start', marginTop: 4 }}>
+                    <button
+                      onClick={() => copyMsg(i, m.text)}
+                      style={{
+                        background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+                        fontSize: 12, fontWeight: 600,
+                        color: copiedIdx === i ? '#16A34A' : '#8A3FBF',
+                      }}
+                    >
+                      {copiedIdx === i ? 'הועתק ✓' : '📋 העתק'}
+                    </button>
+                  </div>
                 )}
               </div>
             </div>
