@@ -19,15 +19,59 @@ export default function GeminiChat() {
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
   const [error, setError] = useState(false)
+  const [listening, setListening] = useState(false)
+  const [micNote, setMicNote] = useState<string | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const recognitionRef = useRef<any>(null)
+
+  // האם הדפדפן תומך בזיהוי קול (Chrome/Edge/Safari מודרני; ב-webkit עם קידומת)
+  const speechSupported = typeof window !== 'undefined' &&
+    !!((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition)
 
   // גלילה לתחתית כשמגיעה הודעה או בזמן "מקליד…"
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, sending])
 
-  const send = async () => {
-    const content = text.trim()
+  // עצירת הזיהוי אם עוזבים את המסך
+  useEffect(() => () => { try { recognitionRef.current?.stop() } catch { /* noop */ } }, [])
+
+  // הפעלה/עצירה של זיהוי קול בעברית. תמלול סופי נכנס לשדה ונשלח אוטומטית.
+  const toggleMic = () => {
+    if (!speechSupported) {
+      setMicNote('זיהוי קול לא נתמך בדפדפן הזה')
+      setTimeout(() => setMicNote(null), 2500)
+      return
+    }
+    if (listening) { try { recognitionRef.current?.stop() } catch { /* noop */ } return }
+
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+    const rec = new SR()
+    rec.lang = 'he-IL'
+    rec.interimResults = false
+    rec.maxAlternatives = 1
+    rec.continuous = false
+    rec.onresult = (e: any) => {
+      const transcript = Array.from(e.results as any)
+        .map((r: any) => r[0]?.transcript || '').join(' ').trim()
+      if (transcript) { setText(transcript); send(transcript) }
+    }
+    rec.onerror = (e: any) => {
+      setListening(false)
+      if (e?.error === 'not-allowed' || e?.error === 'service-not-allowed') {
+        setMicNote('אין הרשאת מיקרופון')
+        setTimeout(() => setMicNote(null), 2500)
+      }
+    }
+    rec.onend = () => setListening(false)
+    recognitionRef.current = rec
+    setMicNote(null)
+    setListening(true)
+    try { rec.start() } catch { setListening(false) }
+  }
+
+  const send = async (override?: string) => {
+    const content = (override ?? text).trim()
     if (!content || sending) return
     setText('')
     setError(false)
@@ -132,6 +176,12 @@ export default function GeminiChat() {
           </div>
         )}
 
+        {micNote && (
+          <div style={{ textAlign: 'center', color: '#8A3FBF', fontSize: 13, margin: '8px 0' }}>
+            {micNote}
+          </div>
+        )}
+
         <div ref={bottomRef} />
       </div>
 
@@ -142,11 +192,11 @@ export default function GeminiChat() {
       }}>
         <div style={{
           flex: 1, background: '#fff', borderRadius: 20, padding: '8px 14px',
-          display: 'flex', alignItems: 'center',
+          display: 'flex', alignItems: 'center', gap: 8,
         }}>
           <input
             type="text"
-            placeholder="כתוב הודעה ל-Gemini"
+            placeholder={listening ? 'מקשיב… דבר עכשיו' : 'כתוב הודעה ל-Gemini'}
             value={text}
             onChange={e => setText(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') send() }}
@@ -155,6 +205,24 @@ export default function GeminiChat() {
               width: '100%', direction: 'rtl', background: 'none', color: '#111',
             }}
           />
+          {/* מיקרופון — זיהוי קול בעברית */}
+          <button
+            onClick={toggleMic}
+            aria-label="דיבור"
+            style={{
+              background: listening ? RED : 'none', border: 'none', cursor: 'pointer',
+              padding: 0, width: 30, height: 30, borderRadius: '50%', flexShrink: 0,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              opacity: speechSupported ? 1 : 0.4,
+              animation: listening ? 'micPulse 1.2s infinite' : 'none',
+            }}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+              <path d="M12 1C10.34 1 9 2.34 9 4V12C9 13.66 10.34 15 12 15C13.66 15 15 13.66 15 12V4C15 2.34 13.66 1 12 1Z" fill={listening ? '#fff' : '#8696A0'}/>
+              <path d="M19 10V12C19 15.87 15.87 19 12 19C8.13 19 5 15.87 5 12V10H3V12C3 16.45 6.16 20.15 10.37 20.86L10 23H14L13.63 20.86C17.84 20.15 21 16.45 21 12V10H19Z" fill={listening ? '#fff' : '#8696A0'}/>
+            </svg>
+            <style>{'@keyframes micPulse { 0%,100%{box-shadow:0 0 0 0 rgba(204,0,0,0.5)} 50%{box-shadow:0 0 0 6px rgba(204,0,0,0)} }'}</style>
+          </button>
         </div>
 
         <button
