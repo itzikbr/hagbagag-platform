@@ -18,7 +18,7 @@ export default function GeminiChat() {
   const [messages, setMessages] = useState<Msg[]>([])
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
-  const [error, setError] = useState(false)
+  const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [listening, setListening] = useState(false)
   const [micNote, setMicNote] = useState<string | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -74,7 +74,7 @@ export default function GeminiChat() {
     const content = (override ?? text).trim()
     if (!content || sending) return
     setText('')
-    setError(false)
+    setErrorMsg(null)
 
     // ההיסטוריה שנשלחת לשרת = כל מה שהיה עד עכשיו (לפני ההודעה החדשה)
     const history = messages.map(m => ({ role: m.role, text: m.text }))
@@ -87,11 +87,15 @@ export default function GeminiChat() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: content, history }),
       })
-      const data = await r.json()
-      if (!r.ok || !data.reply) throw new Error(data.error || 'no-reply')
+      const data = await r.json().catch(() => ({}))
+      if (r.status === 429 || data.quota) throw new Error('quota')
+      if (!r.ok || !data.reply) throw new Error('fail')
       setMessages(prev => [...prev, { role: 'model', text: String(data.reply) }])
-    } catch {
-      setError(true)
+    } catch (e) {
+      // הבחנה בין מיצוי מכסה יומית (הודעה ברורה) לכשל כללי
+      setErrorMsg((e as Error).message === 'quota'
+        ? 'מכסת Gemini היומית נגמרה — נסה שוב מאוחר יותר'
+        : 'השליחה נכשלה — נסה שוב')
       // מחזירים את הטקסט לשדה כדי שאפשר לנסות שוב
       setText(content)
       setMessages(prev => prev.slice(0, -1)) // מסירים את הודעת המשתמש שנכשלה
@@ -170,9 +174,9 @@ export default function GeminiChat() {
           </div>
         )}
 
-        {error && (
+        {errorMsg && (
           <div style={{ textAlign: 'center', color: RED, fontSize: 13, margin: '8px 0' }}>
-            השליחה נכשלה — נסה שוב
+            {errorMsg}
           </div>
         )}
 
