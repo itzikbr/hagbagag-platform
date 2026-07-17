@@ -80,7 +80,7 @@ function PlatformLayout() {
         </Routes>
       </div>
       {!hideNav && <BottomNav activeTab={activeTab} onTabChange={setActiveTab} />}
-      {isAdmin && !hideNav && <HubButton />}
+      {isAdmin && location.pathname === '/gemini' && <HubButton />}
     </div>
   )
 }
