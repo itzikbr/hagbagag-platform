@@ -89,12 +89,16 @@ export default function GeminiChat() {
       })
       const data = await r.json().catch(() => ({}))
       if (r.status === 429 || data.quota) throw new Error('quota')
+      if (r.status === 503 || data.busy) throw new Error('busy')
       if (!r.ok || !data.reply) throw new Error('fail')
       setMessages(prev => [...prev, { role: 'model', text: String(data.reply) }])
     } catch (e) {
-      // הבחנה בין מיצוי מכסה יומית (הודעה ברורה) לכשל כללי
-      setErrorMsg((e as Error).message === 'quota'
+      // הבחנה: מכסה יומית / עומס זמני / כשל כללי
+      const m = (e as Error).message
+      setErrorMsg(m === 'quota'
         ? 'מכסת Gemini היומית נגמרה — נסה שוב מאוחר יותר'
+        : m === 'busy'
+        ? 'Gemini עמוס כרגע — נסה שוב עוד רגע'
         : 'השליחה נכשלה — נסה שוב')
       // מחזירים את הטקסט לשדה כדי שאפשר לנסות שוב
       setText(content)
