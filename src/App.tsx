@@ -13,6 +13,7 @@ import ExecutionSheetView from './pages/ExecutionSheetView'
 import Contacts from './pages/Contacts'
 import Admin from './pages/Admin'
 import LightningScreen from './pages/LightningScreen'
+import GeminiChat from './pages/GeminiChat'
 import BottomNav from './components/BottomNav'
 
 function Splash() {
@@ -45,7 +46,7 @@ function RequireAdmin({ children }: { children: React.ReactNode }) {
 }
 
 function PlatformLayout() {
-  const [activeTab, setActiveTab] = useState<'chats' | 'sheets' | 'more'>('chats')
+  const [activeTab, setActiveTab] = useState<'chats' | 'sheets' | 'more' | 'itzik' | 'gemini'>('chats')
   const location = useLocation()
   const isAdmin = useIsAdmin()
   const hideNav = !isAdmin ||   // משתמש שאינו אדמין רואה רק דפי ביצוע — בלי ניווט תחתון
@@ -73,6 +74,7 @@ function PlatformLayout() {
           <Route path="/contacts"  element={<RequireAdmin><Contacts /></RequireAdmin>} />
           <Route path="/admin"     element={<RequireAdmin><Admin /></RequireAdmin>} />
           <Route path="/itzik"     element={<RequireAdmin><LightningScreen /></RequireAdmin>} />
+          <Route path="/gemini"    element={<RequireAdmin><GeminiChat /></RequireAdmin>} />
           <Route path="*"          element={<Navigate to="/sheets" replace />} />
         </Routes>
       </div>

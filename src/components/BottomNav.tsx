@@ -1,9 +1,11 @@
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useIsAdmin } from '../hooks/useAuth'
 
+type Tab = 'chats' | 'sheets' | 'more' | 'itzik' | 'gemini'
+
 interface BottomNavProps {
-  activeTab: 'chats' | 'sheets' | 'more' | 'itzik'
-  onTabChange: (tab: 'chats' | 'sheets' | 'more' | 'itzik') => void
+  activeTab: Tab
+  onTabChange: (tab: Tab) => void
 }
 
 export default function BottomNav({ activeTab, onTabChange }: BottomNavProps) {
@@ -14,8 +16,9 @@ export default function BottomNav({ activeTab, onTabChange }: BottomNavProps) {
   const isChats = location.pathname.startsWith('/chat') || location.pathname === '/chats'
   const isSheets = location.pathname === '/sheets'
   const isItzik = location.pathname === '/itzik'
+  const isGemini = location.pathname === '/gemini'
 
-  // הטאב האישי (⚡) מוצג רק לאדמין
+  // הטאבים האישיים (⚡ ו-✨) מוצגים רק לאדמין
   const showItzik = isAdmin
 
   const tabs = [
@@ -63,6 +66,14 @@ export default function BottomNav({ activeTab, onTabChange }: BottomNavProps) {
       ),
       path: '/itzik',
     }] : []),
+    ...(showItzik ? [{
+      id: 'gemini' as const,
+      label: '✨',
+      icon: (active: boolean) => (
+        <span style={{ fontSize: 22, lineHeight: 1, opacity: active ? 1 : 0.55 }}>✨</span>
+      ),
+      path: '/gemini',
+    }] : []),
   ]
 
   return (
@@ -77,6 +88,7 @@ export default function BottomNav({ activeTab, onTabChange }: BottomNavProps) {
         const isActive = tab.id === 'chats' ? isChats
           : tab.id === 'sheets' ? isSheets
           : tab.id === 'itzik' ? isItzik
+          : tab.id === 'gemini' ? isGemini
           : activeTab === 'more'
         return (
           <button
