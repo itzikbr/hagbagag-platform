@@ -145,7 +145,7 @@ export default function GeminiChat() {
                   <div style={{ fontSize: 12, fontWeight: 600, color: '#8A3FBF', marginBottom: 2 }}>✨ Gemini</div>
                 )}
                 <span style={{
-                  fontSize: 14.5, color: '#111', lineHeight: 1.5,
+                  fontSize: 17, color: '#111', lineHeight: 1.5,
                   whiteSpace: 'pre-wrap', wordBreak: 'break-word', direction: 'rtl',
                 }}>
                   {m.text}
@@ -203,9 +203,9 @@ export default function GeminiChat() {
             placeholder={listening ? 'מקשיב… דבר עכשיו' : 'כתוב הודעה ל-Gemini'}
             value={text}
             onChange={e => setText(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') send() }}
+            onKeyDown={e => { if (e.key === 'Enter' && !(e.nativeEvent as any).isComposing) { e.preventDefault(); send() } }}
             style={{
-              border: 'none', outline: 'none', fontSize: 15,
+              border: 'none', outline: 'none', fontSize: 16,
               width: '100%', direction: 'rtl', background: 'none', color: '#111',
             }}
           />
