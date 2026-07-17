@@ -15,6 +15,7 @@ import Admin from './pages/Admin'
 import LightningScreen from './pages/LightningScreen'
 import GeminiChat from './pages/GeminiChat'
 import BottomNav from './components/BottomNav'
+import HubButton from './components/HubButton'
 
 function Splash() {
   return (
@@ -79,6 +80,7 @@ function PlatformLayout() {
         </Routes>
       </div>
       {!hideNav && <BottomNav activeTab={activeTab} onTabChange={setActiveTab} />}
+      {isAdmin && !hideNav && <HubButton />}
     </div>
   )
 }

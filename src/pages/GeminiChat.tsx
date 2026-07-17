@@ -12,6 +12,38 @@ const RED = '#CC0000'
 interface Msg {
   role: 'user' | 'model'
   text: string
+  image?: string  // dataURL להצגה בבועה (רק בהודעות משתמש)
+}
+
+interface PendingImage { dataUrl: string; mimeType: string; base64: string }
+
+// קורא קובץ תמונה, מקטין למקסימום 1280px ומחזיר JPEG base64 (מקטין נפח ומאיץ שליחה).
+function readImage(file: File): Promise<PendingImage> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = () => reject(new Error('read-fail'))
+    reader.onload = () => {
+      const img = new Image()
+      img.onerror = () => reject(new Error('img-fail'))
+      img.onload = () => {
+        const maxDim = 1280
+        let { width, height } = img
+        if (width > maxDim || height > maxDim) {
+          const s = maxDim / Math.max(width, height)
+          width = Math.round(width * s); height = Math.round(height * s)
+        }
+        const canvas = document.createElement('canvas')
+        canvas.width = width; canvas.height = height
+        const ctx = canvas.getContext('2d')
+        if (!ctx) { reject(new Error('no-ctx')); return }
+        ctx.drawImage(img, 0, 0, width, height)
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.85)
+        resolve({ dataUrl, mimeType: 'image/jpeg', base64: dataUrl.split(',')[1] })
+      }
+      img.src = reader.result as string
+    }
+    reader.readAsDataURL(file)
+  })
 }
 
 export default function GeminiChat() {
@@ -21,8 +53,11 @@ export default function GeminiChat() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [listening, setListening] = useState(false)
   const [micNote, setMicNote] = useState<string | null>(null)
+  const [pendingImage, setPendingImage] = useState<PendingImage | null>(null)
+  const [copied, setCopied] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
   const recognitionRef = useRef<any>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // האם הדפדפן תומך בזיהוי קול (Chrome/Edge/Safari מודרני; ב-webkit עם קידומת)
   const speechSupported = typeof window !== 'undefined' &&
@@ -72,20 +107,24 @@ export default function GeminiChat() {
 
   const send = async (override?: string) => {
     const content = (override ?? text).trim()
-    if (!content || sending) return
+    const img = pendingImage
+    if ((!content && !img) || sending) return
     setText('')
     setErrorMsg(null)
+    setPendingImage(null)
 
     // ההיסטוריה שנשלחת לשרת = כל מה שהיה עד עכשיו (לפני ההודעה החדשה)
     const history = messages.map(m => ({ role: m.role, text: m.text }))
-    setMessages(prev => [...prev, { role: 'user', text: content }])
+    setMessages(prev => [...prev, { role: 'user', text: content, image: img?.dataUrl }])
     setSending(true)
 
     try {
+      const body: any = { message: content, history }
+      if (img) body.image = { mimeType: img.mimeType, data: img.base64 }
       const r = await fetch('/gemini-api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: content, history }),
+        body: JSON.stringify(body),
       })
       const data = await r.json().catch(() => ({}))
       if (r.status === 429 || data.quota) throw new Error('quota')
@@ -100,12 +139,42 @@ export default function GeminiChat() {
         : m === 'busy'
         ? 'Gemini עמוס כרגע — נסה שוב עוד רגע'
         : 'השליחה נכשלה — נסה שוב')
-      // מחזירים את הטקסט לשדה כדי שאפשר לנסות שוב
+      // מחזירים את הטקסט/התמונה כדי שאפשר לנסות שוב
       setText(content)
+      setPendingImage(img)
       setMessages(prev => prev.slice(0, -1)) // מסירים את הודעת המשתמש שנכשלה
     } finally {
       setSending(false)
     }
+  }
+
+  // בחירת תמונה מהגלריה → הקטנה → נשמרת כ-pending עד השליחה
+  const pickImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = '' // כדי שאפשר לבחור שוב את אותו קובץ
+    if (!file) return
+    try { setPendingImage(await readImage(file)) }
+    catch {
+      setMicNote('טעינת התמונה נכשלה')
+      setTimeout(() => setMicNote(null), 2500)
+    }
+  }
+
+  // העתקת כל השיחה ללוח
+  const copyAll = async () => {
+    const transcript = messages
+      .map(m => `${m.role === 'user' ? 'אני' : 'Gemini'}: ${m.text}`)
+      .join('\n\n')
+    try {
+      if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(transcript)
+      else {
+        const ta = document.createElement('textarea')
+        ta.value = transcript; ta.style.position = 'fixed'; ta.style.opacity = '0'
+        document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta)
+      }
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1600)
+    } catch { /* noop */ }
   }
 
   return (
@@ -148,12 +217,20 @@ export default function GeminiChat() {
                 {!isMine && (
                   <div style={{ fontSize: 12, fontWeight: 600, color: '#8A3FBF', marginBottom: 2 }}>✨ Gemini</div>
                 )}
-                <span style={{
-                  fontSize: 17, color: '#111', lineHeight: 1.5,
-                  whiteSpace: 'pre-wrap', wordBreak: 'break-word', direction: 'rtl',
-                }}>
-                  {m.text}
-                </span>
+                {m.image && (
+                  <img src={m.image} alt="תמונה" style={{
+                    display: 'block', maxWidth: '100%', width: 200, borderRadius: 8,
+                    marginBottom: m.text ? 6 : 0,
+                  }} />
+                )}
+                {m.text && (
+                  <span style={{
+                    fontSize: 17, color: '#111', lineHeight: 1.5,
+                    whiteSpace: 'pre-wrap', wordBreak: 'break-word', direction: 'rtl',
+                  }}>
+                    {m.text}
+                  </span>
+                )}
               </div>
             </div>
           )
@@ -193,11 +270,53 @@ export default function GeminiChat() {
         <div ref={bottomRef} />
       </div>
 
+      {/* שורת "העתק הכל" — בתחתית השיחה, רק כשיש הודעות */}
+      {messages.length > 0 && (
+        <div style={{
+          background: '#F0F2F5', borderTop: '1px solid #E4E4E4',
+          display: 'flex', justifyContent: 'center', padding: '6px 12px 0', flexShrink: 0,
+        }}>
+          <button
+            onClick={copyAll}
+            style={{
+              background: 'none', border: 'none', cursor: 'pointer',
+              color: copied ? '#16A34A' : '#54656F', fontSize: 13, fontWeight: 600,
+              display: 'flex', alignItems: 'center', gap: 5, padding: '4px 10px',
+            }}
+          >
+            {copied ? 'הועתק ✓' : '📋 העתק הכל'}
+          </button>
+        </div>
+      )}
+
+      {/* תצוגה מקדימה של תמונה שנבחרה, לפני שליחה */}
+      {pendingImage && (
+        <div style={{
+          background: '#F0F2F5', padding: '8px 12px 0', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0,
+        }}>
+          <div style={{ position: 'relative' }}>
+            <img src={pendingImage.dataUrl} alt="לשליחה" style={{ height: 56, borderRadius: 8, display: 'block' }} />
+            <button
+              onClick={() => setPendingImage(null)}
+              aria-label="הסר תמונה"
+              style={{
+                position: 'absolute', top: -6, right: -6, width: 20, height: 20, borderRadius: '50%',
+                background: '#000', color: '#fff', border: '2px solid #F0F2F5', cursor: 'pointer',
+                fontSize: 11, lineHeight: '16px', padding: 0,
+              }}
+            >✕</button>
+          </div>
+          <span style={{ fontSize: 13, color: '#54656F' }}>תמונה מצורפת</span>
+        </div>
+      )}
+
       {/* Input bar */}
       <div style={{
         background: '#F0F2F5', padding: '8px 12px',
         display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0,
       }}>
+        {/* input קובץ נסתר — 📷 פותח אותו */}
+        <input ref={fileInputRef} type="file" accept="image/*" onChange={pickImage} style={{ display: 'none' }} />
         <div style={{
           flex: 1, background: '#fff', borderRadius: 20, padding: '8px 14px',
           display: 'flex', alignItems: 'center', gap: 8,
@@ -213,6 +332,16 @@ export default function GeminiChat() {
               width: '100%', direction: 'rtl', background: 'none', color: '#111',
             }}
           />
+          {/* תמונה — פותח גלריה */}
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            aria-label="צרף תמונה"
+            style={{
+              background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+              width: 30, height: 30, flexShrink: 0, fontSize: 20, lineHeight: 1,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}
+          >📷</button>
           {/* מיקרופון — זיהוי קול בעברית */}
           <button
             onClick={toggleMic}
@@ -235,11 +364,11 @@ export default function GeminiChat() {
 
         <button
           onClick={() => send()}
-          disabled={!text.trim() || sending}
+          disabled={(!text.trim() && !pendingImage) || sending}
           style={{
             width: 44, height: 44, borderRadius: '50%',
-            background: (!text.trim() || sending) ? '#E0A5A5' : RED,
-            border: 'none', cursor: (!text.trim() || sending) ? 'default' : 'pointer',
+            background: ((!text.trim() && !pendingImage) || sending) ? '#E0A5A5' : RED,
+            border: 'none', cursor: ((!text.trim() && !pendingImage) || sending) ? 'default' : 'pointer',
             display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
             transition: 'background 0.15s',
           }}
