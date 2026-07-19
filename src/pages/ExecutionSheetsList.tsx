@@ -9,6 +9,7 @@ interface SheetRow {
   id: string
   project_name: string
   is_archived: boolean
+  filled_by_name: string | null
   progress_data: { execution_date?: string; team_lead?: string; subcontractor?: string } | null
   buildings: BuildingRow[] | null
 }
@@ -22,12 +23,30 @@ interface DecoratedSheet {
   when: 'past' | 'today' | 'future' | 'none'
   teamLead: string
   subcontractor: string
+  filledBy: string
 }
 type View = 'active' | 'archived'
 
 const RED = '#CC0000'
 const BLUE = '#1A5FAD'
 const GREY = '#8696A0'
+const CREAM = '#F2EDE9'
+
+// ── עזרי אווטאר לפאנל הסינון ───────────────────────────────────
+const AVATAR_COLORS = ['#CC0000', '#1A5FAD', '#0F8A5F', '#B8860B', '#7A3FB8', '#C2410C']
+// ראשי תיבות: אות ראשונה מכל אחת מ-2 המילים הראשונות (או 2 תווים אם מילה אחת).
+function initials(name: string): string {
+  const w = (name || '').trim().split(/\s+/).filter(Boolean)
+  if (!w.length) return '?'
+  if (w.length === 1) return w[0].slice(0, 2)
+  return w[0][0] + w[1][0]
+}
+// צבע דטרמיניסטי לפי השם — קבוע לכל שם, מגוון בין שמות.
+function avatarColor(name: string): string {
+  let h = 0
+  for (const c of name) h = (h * 31 + c.charCodeAt(0)) >>> 0
+  return AVATAR_COLORS[h % AVATAR_COLORS.length]
+}
 
 // ── עזרי תאריך/שם ──────────────────────────────────────────────
 function parseExec(s?: string): Date | null {
@@ -76,6 +95,11 @@ export default function ExecutionSheetsList() {
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [view, setView] = useState<View>('active')
+  // סינון לפי "ממלא הטופס": [] = הכל (ללא סינון). draft = הבחירה בתוך הפאנל
+  // עד לחיצת "אישור". state נשמר בזיכרון הרכיב בלבד (ללא persistence).
+  const [selectedFillers, setSelectedFillers] = useState<string[]>([])
+  const [filterOpen, setFilterOpen] = useState(false)
+  const [draftFillers, setDraftFillers] = useState<string[]>([])
   const [confirm, setConfirm] = useState<{ message: string; danger: boolean; action: () => void } | null>(null)
   const askConfirm = (message: string, danger: boolean, action: () => void) => setConfirm({ message, danger, action })
 
@@ -130,7 +154,7 @@ export default function ExecutionSheetsList() {
     try {
       const query = supabase
         .from('execution_sheets')
-        .select('id, project_name, is_archived, progress_data, buildings(work_content)')
+        .select('id, project_name, is_archived, filled_by_name, progress_data, buildings(work_content)')
         .order('created_at', { ascending: false })
 
       const { data, error } = await Promise.race([query, timeout]) as
@@ -217,14 +241,25 @@ export default function ExecutionSheetsList() {
         when: whenOf(execDate, today),
         teamLead: s.progress_data?.team_lead ?? '',
         subcontractor: s.progress_data?.subcontractor ?? '',
+        filledBy: (s.filled_by_name ?? '').trim(),
       }
     })
 
+  // רשימת "ממלאי הטופס" הייחודיים — נגזרת דינמית מהדפים שנטענו בפועל מה-DB
+  // (כל הדפים, בכל התצוגות), ממוינת בעברית. לא רשימה קשיחה.
+  const allFillers = Array.from(
+    new Set(sheets.map(s => (s.filled_by_name ?? '').trim()).filter(Boolean))
+  ).sort((a, b) => a.localeCompare(b, 'he'))
+
   const q = search.trim().toLowerCase()
-  const filtered = (q
+  const bySearch = q
     ? decorated.filter(d => d.name.toLowerCase().includes(q) || d.orderNumber.toLowerCase().includes(q))
     : decorated
-  ).sort((a, b) => (a.execMs - b.execMs) || a.name.localeCompare(b.name, 'he'))
+  // סינון לפי ממלא הטופס: בחירה ריקה = הכל (ללא סינון)
+  const byFiller = selectedFillers.length
+    ? bySearch.filter(d => selectedFillers.includes(d.filledBy))
+    : bySearch
+  const filtered = byFiller.sort((a, b) => (a.execMs - b.execMs) || a.name.localeCompare(b.name, 'he'))
 
   // גלילה כך שהיום/עתיד יופיעו בראש התצוגה (למעלה=עבר, למטה=עתיד). פעם אחת לכל view.
   useEffect(() => {
@@ -282,21 +317,72 @@ export default function ExecutionSheetsList() {
         )}
       </div>
 
-      {/* Search */}
+      {/* Search + Filter */}
       <div style={{ background: '#fff', padding: '10px 12px', flexShrink: 0 }}>
         <div style={{
-          maxWidth: 600, margin: '0 auto', height: 44, background: '#F4F1EE', borderRadius: 12,
-          border: `2px solid #D8CFC8`, display: 'flex', alignItems: 'center', padding: '0 14px', gap: 10,
+          maxWidth: 600, margin: '0 auto', display: 'flex', alignItems: 'center', gap: 8, position: 'relative',
         }}>
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0 }}>
-            <circle cx="11" cy="11" r="8" stroke="#8696A0" strokeWidth="2"/>
-            <path d="M21 21L16.65 16.65" stroke="#8696A0" strokeWidth="2"/>
-          </svg>
-          <input type="text" placeholder="חיפוש לפי שם לקוח או מספר הזמנה" value={search}
-            onChange={e => setSearch(e.target.value)}
-            style={{ border: 'none', background: 'none', outline: 'none', fontSize: 16, fontWeight: 600, color: '#111', width: '100%', height: '100%', direction: 'rtl' }} />
+          <div style={{
+            flex: 1, height: 44, background: '#F4F1EE', borderRadius: 12,
+            border: `2px solid #D8CFC8`, display: 'flex', alignItems: 'center', padding: '0 14px', gap: 10, minWidth: 0,
+          }}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0 }}>
+              <circle cx="11" cy="11" r="8" stroke="#8696A0" strokeWidth="2"/>
+              <path d="M21 21L16.65 16.65" stroke="#8696A0" strokeWidth="2"/>
+            </svg>
+            <input type="text" placeholder="חיפוש לפי שם לקוח או מספר הזמנה" value={search}
+              onChange={e => setSearch(e.target.value)}
+              style={{ border: 'none', background: 'none', outline: 'none', fontSize: 16, fontWeight: 600, color: '#111', width: '100%', height: '100%', direction: 'rtl' }} />
+          </div>
+
+          {/* כפתור סינון עגול — 👥 עם badge של מספר הנבחרים */}
+          <button type="button" title="סינון לפי ממלא הטופס"
+            onClick={() => { setDraftFillers(selectedFillers); setFilterOpen(o => !o) }}
+            style={{
+              position: 'relative', width: 44, height: 44, borderRadius: '50%', background: RED,
+              border: 'none', cursor: 'pointer', flexShrink: 0, display: 'flex',
+              alignItems: 'center', justifyContent: 'center', fontSize: 20, lineHeight: 1,
+              boxShadow: filterOpen ? '0 0 0 3px rgba(204,0,0,0.25)' : '0 1px 3px rgba(0,0,0,0.2)',
+            }}>
+            👥
+            {selectedFillers.length > 0 && (
+              <span style={{
+                position: 'absolute', top: -4, right: -4, minWidth: 18, height: 18, borderRadius: 9,
+                background: '#fff', color: RED, border: `2px solid ${RED}`, fontSize: 11, fontWeight: 800,
+                display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 3px',
+                fontVariantNumeric: 'tabular-nums',
+              }}>{selectedFillers.length}</span>
+            )}
+          </button>
+
+          {filterOpen && (
+            <FilterPanel
+              allFillers={allFillers}
+              draft={draftFillers}
+              onToggle={name => setDraftFillers(cur =>
+                cur.includes(name) ? cur.filter(n => n !== name) : [...cur, name])}
+              onAll={() => setDraftFillers([])}
+              onClear={() => setDraftFillers([])}
+              onConfirm={() => { setSelectedFillers(draftFillers); setFilterOpen(false) }}
+              onClose={() => setFilterOpen(false)}
+            />
+          )}
         </div>
       </div>
+
+      {/* שורת מצב — מוצגת רק כשיש סינון פעיל (בחירה שאינה "הכל") */}
+      {selectedFillers.length > 0 && (
+        <div style={{
+          background: CREAM, padding: '7px 14px', flexShrink: 0, direction: 'rtl',
+          borderBottom: '1px solid #E5DDD5', display: 'flex', alignItems: 'center',
+          gap: 6, flexWrap: 'wrap', fontSize: 13, color: '#6B5E54',
+        }}>
+          <span style={{ fontWeight: 700, color: '#4A4038' }}>
+            מציג {filtered.length} מתוך {bySearch.length} דפי ביצוע
+          </span>
+          <span>— מסונן לפי: {selectedFillers.join(', ')}</span>
+        </div>
+      )}
 
       {/* List */}
       <div ref={listRef} style={{ flex: 1, overflowY: 'auto', background: '#fff' }} className="no-scrollbar">
@@ -369,6 +455,103 @@ function ConfirmDialog({ message, danger, onCancel, onConfirm }: {
         </div>
       </div>
     </div>
+  )
+}
+
+// ── פאנל סינון לפי "ממלא הטופס" ────────────────────────────────
+function FilterPanel({ allFillers, draft, onToggle, onAll, onClear, onConfirm, onClose }: {
+  allFillers: string[]
+  draft: string[]
+  onToggle: (name: string) => void
+  onAll: () => void
+  onClear: () => void
+  onConfirm: () => void
+  onClose: () => void
+}) {
+  const isAll = draft.length === 0
+  return (
+    <>
+      {/* backdrop — לחיצה מחוץ לפאנל סוגרת (ומבטלת את הטיוטה) */}
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 40 }} />
+
+      <div style={{
+        position: 'absolute', top: 52, left: 0, right: 0, zIndex: 50, direction: 'rtl',
+        background: '#fff', borderRadius: 14, border: '1px solid #E5DDD5',
+        boxShadow: '0 10px 34px rgba(0,0,0,0.22)', overflow: 'hidden',
+      }}>
+        <div style={{
+          padding: '10px 14px', background: CREAM, borderBottom: '1px solid #E5DDD5',
+          fontSize: 13, fontWeight: 800, color: '#4A4038',
+        }}>סינון לפי ממלא הטופס</div>
+
+        <div style={{ maxHeight: 300, overflowY: 'auto' }} className="no-scrollbar">
+          {/* "הכל" */}
+          <FilterRow checked={isAll} label="הכל" onClick={onAll} />
+
+          {allFillers.length === 0 && (
+            <div style={{ padding: '14px', fontSize: 13, color: GREY, textAlign: 'center' }}>
+              אין עדיין שמות ממלאים
+            </div>
+          )}
+
+          {allFillers.map(name => (
+            <FilterRow key={name} checked={draft.includes(name)} label={name}
+              avatar={{ text: initials(name), color: avatarColor(name) }}
+              onClick={() => onToggle(name)} />
+          ))}
+        </div>
+
+        {/* כפתורי תחתית */}
+        <div style={{ display: 'flex', gap: 10, padding: 12, borderTop: '1px solid #EEE' }}>
+          <button type="button" onClick={onClear} style={{
+            flex: 1, padding: 11, borderRadius: 10, border: '1.5px solid #DDD6D0', background: '#fff',
+            color: '#555', fontSize: 14, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
+          }}>נקה בחירה</button>
+          <button type="button" onClick={onConfirm} style={{
+            flex: 1, padding: 11, borderRadius: 10, border: 'none', background: RED,
+            color: '#fff', fontSize: 14, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
+          }}>אישור</button>
+        </div>
+      </div>
+    </>
+  )
+}
+
+// שורה בפאנל: checkbox + (אווטאר אופציונלי) + שם
+function FilterRow({ checked, label, avatar, onClick }: {
+  checked: boolean; label: string; avatar?: { text: string; color: string }; onClick: () => void
+}) {
+  return (
+    <button type="button" onClick={onClick} style={{
+      width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px',
+      background: checked ? '#FBF4F4' : '#fff', border: 'none', borderBottom: '1px solid #F3EFEB',
+      cursor: 'pointer', fontFamily: 'inherit', direction: 'rtl', textAlign: 'right',
+    }}>
+      {/* checkbox */}
+      <span style={{
+        width: 20, height: 20, borderRadius: 6, flexShrink: 0,
+        border: `2px solid ${checked ? RED : '#C9C0B8'}`, background: checked ? RED : '#fff',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}>
+        {checked && (
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+            <path d="M20 6L9 17l-5-5" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+        )}
+      </span>
+
+      {avatar && (
+        <span style={{
+          width: 30, height: 30, borderRadius: '50%', flexShrink: 0, background: avatar.color,
+          color: '#fff', fontSize: 12, fontWeight: 800, display: 'flex',
+          alignItems: 'center', justifyContent: 'center',
+        }}>{avatar.text}</span>
+      )}
+
+      <span style={{ fontSize: 15, fontWeight: 700, color: '#111', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {label}
+      </span>
+    </button>
   )
 }
 
