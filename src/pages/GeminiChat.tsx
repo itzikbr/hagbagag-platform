@@ -58,6 +58,7 @@ export default function GeminiChat() {
   const bottomRef = useRef<HTMLDivElement>(null)
   const recognitionRef = useRef<any>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const taRef = useRef<HTMLTextAreaElement>(null)
 
   // האם הדפדפן תומך בזיהוי קול (Chrome/Edge/Safari מודרני; ב-webkit עם קידומת)
   const speechSupported = typeof window !== 'undefined' &&
@@ -67,6 +68,15 @@ export default function GeminiChat() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, sending])
+
+  // התאמת גובה ה-textarea לתוכן (עד ~5 שורות). רץ בכל שינוי טקסט —
+  // כולל הקלדה, ניקוי אחרי שליחה, והחזרת טקסט אחרי כשל.
+  useEffect(() => {
+    const el = taRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = Math.min(el.scrollHeight, 120) + 'px'
+  }, [text])
 
   // עצירת הזיהוי אם עוזבים את המסך
   useEffect(() => () => { try { recognitionRef.current?.stop() } catch { /* noop */ } }, [])
@@ -308,23 +318,27 @@ export default function GeminiChat() {
       {/* Input bar */}
       <div style={{
         background: '#F0F2F5', padding: '8px 12px',
-        display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0,
+        display: 'flex', alignItems: 'flex-end', gap: 8, flexShrink: 0,
       }}>
         {/* input קובץ נסתר — 📷 פותח אותו */}
         <input ref={fileInputRef} type="file" accept="image/*" onChange={pickImage} style={{ display: 'none' }} />
         <div style={{
           flex: 1, background: '#fff', borderRadius: 20, padding: '8px 14px',
-          display: 'flex', alignItems: 'center', gap: 8,
+          display: 'flex', alignItems: 'flex-end', gap: 8,
         }}>
-          <input
-            type="text"
+          {/* textarea: Enter לעולם לא שולח — רק מוסיף שורה חדשה (התנהגות textarea רגילה).
+              השליחה היחידה היא דרך כפתור השליחה. הגובה גדל עם התוכן עד ~5 שורות. */}
+          <textarea
+            ref={taRef}
+            rows={1}
             placeholder={listening ? 'מקשיב… דבר עכשיו' : 'כתוב הודעה ל-Gemini'}
             value={text}
             onChange={e => setText(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter' && !(e.nativeEvent as any).isComposing) { e.preventDefault(); send() } }}
             style={{
               border: 'none', outline: 'none', fontSize: 16,
               width: '100%', direction: 'rtl', background: 'none', color: '#111',
+              resize: 'none', fontFamily: 'inherit', lineHeight: 1.4,
+              maxHeight: 120, overflowY: 'auto', display: 'block',
             }}
           />
           {/* תמונה — פותח גלריה */}
@@ -358,6 +372,11 @@ export default function GeminiChat() {
         </div>
 
         <button
+          type="button"
+          // onMouseDown/preventDefault שומר על הפוקוס בשדה: ב-iOS הקשה על הכפתור
+          // בזמן שהמקלדת פתוחה הייתה מטשטשת (blur) את השדה ו"בולעת" את הלחיצה,
+          // כך שההודעה לא נשלחה. מניעת ברירת המחדל גורמת ל-onClick לפעול תמיד.
+          onMouseDown={e => e.preventDefault()}
           onClick={() => send()}
           disabled={(!text.trim() && !pendingImage) || sending}
           style={{
