@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
+import MaterialsTab, { type SmartMaterials, emptySmartMaterials, normalizeSmartMaterials } from './MaterialsTab'
 
 // ══════════════════════════════════════════════════════════════
 // חג בגג — דף ביצוע v3 · טופס 3 לשוניות
@@ -194,6 +195,7 @@ interface SheetForm {
   workTypes: string[]
   blocks: WorkBlocks
   materials: MaterialsState
+  smartMaterials: SmartMaterials   // לשונית חומרים חכמה (מבוססת קטלוג DB)
   documentation: Documentation
   progress: ProgressData
   notes: Record<string, string>
@@ -278,6 +280,7 @@ function emptyForm(): SheetForm {
     workTypes: [],
     blocks: emptyBlocks(),
     materials: { active: ['flashing'], data: { flashing: emptyCategory() } },
+    smartMaterials: emptySmartMaterials(),
     documentation: { photos: [], sketch: [], documents: [] },
     progress: emptyProgress(),
     notes: {},
@@ -1169,6 +1172,7 @@ export default function NewExecutionSheet() {
         workTypes: wc.workTypes ?? (b?.work_types ?? []),
         blocks: { ...emptyBlocks(), ...(wc.blocks ?? {}), asbestos: normalizeAsbestos(wc.blocks?.asbestos) },
         materials: normalizeMaterials(b?.materials, base.materials),
+        smartMaterials: normalizeSmartMaterials((wc as { smartMaterials?: unknown }).smartMaterials),
         documentation: { ...base.documentation, ...(wc.documentation ?? {}) },
         progress: (() => {
           const bp = emptyProgress()
@@ -1282,6 +1286,7 @@ export default function NewExecutionSheet() {
         },
         notes: f.notes,
         others: f.others,
+        smartMaterials: f.smartMaterials,
       },
       materials: f.materials,
     }
@@ -1544,25 +1549,13 @@ export default function NewExecutionSheet() {
           </>
         )}
 
-        {/* ══ לשונית חומרים ══ */}
+        {/* ══ לשונית חומרים (חכמה — מבוססת קטלוג DB) ══ */}
         {tab === 'materials' && (
-          <>
-            {form.materials.active.map(key => (
-              <MaterialCategoryCard key={key} catKey={key} cat={form.materials.data[key] ?? emptyCategory()}
-                onChange={c => setCategory(key, c)} onRemove={() => removeCategory(key)} others={form.others} setOther={setOther} />
-            ))}
-            {inactiveCats.length > 0 && (
-              <div style={{ margin: '6px 8px' }}>
-                <select dir="rtl" value="" onChange={e => { if (e.target.value) addCategory(e.target.value) }} style={{
-                  ...inputStyle, color: '#555', appearance: 'none', cursor: 'pointer',
-                  border: `1.5px dashed ${RED}`, height: 42, fontWeight: 700,
-                }}>
-                  <option value="" disabled hidden>＋ הוסף קטגוריה</option>
-                  {inactiveCats.map(k => <option key={k} value={k}>{CATEGORY_META[k].label}</option>)}
-                </select>
-              </div>
-            )}
-          </>
+          <MaterialsTab
+            workTypes={form.workTypes}
+            value={form.smartMaterials}
+            onChange={v => setForm(f => ({ ...f, smartMaterials: v }))}
+          />
         )}
 
         {/* ══ לשונית התקדמות ══ */}

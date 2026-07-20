@@ -177,12 +177,20 @@ export default function Admin() {
           </button>
           <span style={{ color: '#fff', fontWeight: 600, fontSize: 18 }}>ניהול משתמשים</span>
         </div>
-        <button
-          onClick={() => { setShowAddForm(!showAddForm); setAddMsg('') }}
-          style={{ background: 'rgba(255,255,255,0.2)', border: 'none', borderRadius: 20, padding: '6px 14px', color: '#fff', fontSize: 14, cursor: 'pointer', fontWeight: 600 }}
-        >
-          {showAddForm ? 'ביטול' : '+ הוסף'}
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            onClick={() => navigate('/admin/materials')}
+            style={{ background: 'rgba(255,255,255,0.2)', border: 'none', borderRadius: 20, padding: '6px 14px', color: '#fff', fontSize: 14, cursor: 'pointer', fontWeight: 600 }}
+          >
+            🧱 קטלוג חומרים
+          </button>
+          <button
+            onClick={() => { setShowAddForm(!showAddForm); setAddMsg('') }}
+            style={{ background: 'rgba(255,255,255,0.2)', border: 'none', borderRadius: 20, padding: '6px 14px', color: '#fff', fontSize: 14, cursor: 'pointer', fontWeight: 600 }}
+          >
+            {showAddForm ? 'ביטול' : '+ הוסף'}
+          </button>
+        </div>
       </div>
 
       <div style={{ flex: 1, overflowY: 'auto', background: '#F0F2F5' }} className="no-scrollbar">
