@@ -146,9 +146,9 @@ export default function ExecutionSheetsList() {
   }, [])
 
   // ניסיון בודד לשאילתה, עם timeout. זורק על שגיאה/פג-זמן.
-  async function fetchSheetsOnce(): Promise<SheetRow[]> {
+  async function fetchSheetsOnce(timeoutMs: number): Promise<SheetRow[]> {
     let timer: ReturnType<typeof setTimeout> | undefined
-    const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('timeout')), 10000) })
+    const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('timeout')), timeoutMs) })
     try {
       const query = supabase
         .from('execution_sheets')
@@ -169,18 +169,20 @@ export default function ExecutionSheetsList() {
 
     const t0 = Date.now()
     try {
-      // כשל לסירוגין (למשל stall של רענון token ב-supabase-js, בעיקר ב-PWA של iOS)
-      // נפתר ברֶטרי — עד 3 ניסיונות עם השהיה גוברת לפני שמכריזים על שגיאה.
+      // הבקשה הראשונה אחרי cold-start ב-PWA של iOS נתקעת (~10ש') בעוד הריטריי
+      // מצליח מיד (אומת ב-beacon: attempt2, online, ~12ש'). לכן timeout מדורג:
+      // ניסיון 1 קצר (4ש') → הריטריי קופץ מהר; מאוחר יותר ארוך יותר לרשת איטית אמיתית.
+      const TIMEOUTS = [4000, 8000, 12000, 12000]
       let data: SheetRow[] | null = null
       let lastErr: unknown = null
       let usedAttempts = 0
-      for (let attempt = 0; attempt < 3; attempt++) {
+      for (let attempt = 0; attempt < TIMEOUTS.length; attempt++) {
         usedAttempts = attempt + 1
-        try { data = await fetchSheetsOnce(); lastErr = null; break }
+        try { data = await fetchSheetsOnce(TIMEOUTS[attempt]); lastErr = null; break }
         catch (e) {
           lastErr = e
           console.warn(`[sheets] attempt ${attempt + 1} failed:`, e)
-          if (attempt < 2) await new Promise(r => setTimeout(r, 500 * (attempt + 1)))
+          if (attempt < TIMEOUTS.length - 1) await new Promise(r => setTimeout(r, 250))
         }
       }
       if (!aliveRef.current) return
