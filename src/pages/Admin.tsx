@@ -39,9 +39,10 @@ export default function Admin() {
   const [editingUsername, setEditingUsername] = useState<{ id: string; value: string } | null>(null)
   const [changingPassword, setChangingPassword] = useState<{ id: string; value: string } | null>(null)
 
-  useEffect(() => {
-    if (profile?.role === 'manager' || profile?.role === 'admin') loadUsers()
-  }, [profile])
+  // טוענים תמיד ב-mount — לא מגודר ב-profile.role (שעלול להיות null/מאוחר
+  // ולהשאיר את הספינר תקוע לנצח). RequireAdmin כבר שומר על הגישה, וה-RLS
+  // בשרת קובע אילו שורות נשלפות לפי ה-uid המאומת.
+  useEffect(() => { loadUsers() }, [])
 
   async function loadUsers() {
     setLoading(true); setLoadError(false)
