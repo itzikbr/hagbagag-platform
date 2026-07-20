@@ -86,6 +86,18 @@ const BADGE: Record<DecoratedSheet['when'], { bg: string; color: string }> = {
   none:   { bg: '#EEE',    color: GREY },
 }
 
+// דיווח beacon לשרת (gemini-server → journald). fire-and-forget, לא חוסם ולא זורק.
+function reportClient(payload: Record<string, unknown>) {
+  try {
+    fetch('/gemini-api/client-log', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...payload, ua: navigator.userAgent.slice(0, 120), t: new Date().toISOString() }),
+      keepalive: true,
+    }).catch(() => { /* noop */ })
+  } catch { /* noop */ }
+}
+
 export default function ExecutionSheetsList() {
   const navigate = useNavigate()
   const isAdmin = useIsAdmin()
@@ -166,12 +178,15 @@ export default function ExecutionSheetsList() {
     const seq = ++reqSeq.current
     if (!background) { setLoading(true); setError(null) }
 
+    const t0 = Date.now()
     try {
       // כשל לסירוגין (למשל stall של רענון token ב-supabase-js, בעיקר ב-PWA של iOS)
       // נפתר ברֶטרי — עד 3 ניסיונות עם השהיה גוברת לפני שמכריזים על שגיאה.
       let data: SheetRow[] | null = null
       let lastErr: unknown = null
+      let usedAttempts = 0
       for (let attempt = 0; attempt < 3; attempt++) {
+        usedAttempts = attempt + 1
         try { data = await fetchSheetsOnce(); lastErr = null; break }
         catch (e) {
           lastErr = e
@@ -183,12 +198,16 @@ export default function ExecutionSheetsList() {
 
       if (lastErr) {
         console.error('[sheets] loadSheets failed after retries:', lastErr)
+        reportClient({ where: 'sheets-load-failed', attempts: usedAttempts, ms: Date.now() - t0, online: navigator.onLine, background, msg: String((lastErr as Error)?.message ?? lastErr).slice(0, 200) })
         if (!loadedOnce.current) setError('לא הצלחנו לטעון את דפי הביצוע. נסה שוב.')
-      } else if (seq > appliedSeq.current) {
-        appliedSeq.current = seq
-        setSheets(data ?? [])
-        setError(null)
-        loadedOnce.current = true
+      } else {
+        if (usedAttempts > 1) reportClient({ where: 'sheets-load-recovered', attempts: usedAttempts, ms: Date.now() - t0, online: navigator.onLine, background })
+        if (seq > appliedSeq.current) {
+          appliedSeq.current = seq
+          setSheets(data ?? [])
+          setError(null)
+          loadedOnce.current = true
+        }
       }
     } finally {
       // תמיד מכבים את הספינר בסיום ניסיון foreground — כדי שלא נתקע לנצח על "טוען…".
