@@ -5,6 +5,12 @@ import { useAuth } from '../hooks/useAuth'
 import { DBMessage } from '../types'
 import Avatar from '../components/Avatar'
 import GroupManagementPanel from '../components/GroupManagementPanel'
+import { reportClient, errDetail } from '../lib/report'
+
+// מריץ הבטחה עם timeout — אם לא הושלמה בזמן, נזרק 'timeout' (הבקשה שברקע ננטשת).
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([p, new Promise<T>((_, reject) => setTimeout(() => reject(new Error('timeout')), ms))])
+}
 
 interface GroupInfo {
   id: string
@@ -59,42 +65,38 @@ export default function ChatConversation() {
   async function loadGroupAndMessages() {
     if (!groupId) return
     setLoading(true)
-    try {
-      // Group info
+
+    // שלוש השאילתות. שאילתה שנתקעת (cold-start ב-PWA של iOS) הייתה תולה את
+    // ה-await לנצח וה-finally לא רץ → תקוע על "טוען…". עוטפים ב-timeout מדורג
+    // עם retry, כך שהניסיון הראשון נכשל מהר והריטריי (שמצליח) קופץ מיד.
+    const run = async () => {
       const { data: gData } = await supabase
-        .from('groups')
-        .select('id, name, type')
-        .eq('id', groupId)
-        .single()
-
-      // Member count
+        .from('groups').select('id, name, type').eq('id', groupId).single()
       const { count } = await supabase
-        .from('group_members')
-        .select('*', { count: 'exact', head: true })
-        .eq('group_id', groupId)
-        .is('left_at', null)
-
+        .from('group_members').select('*', { count: 'exact', head: true })
+        .eq('group_id', groupId).is('left_at', null)
       if (gData) {
-        setGroupInfo({
-          id: gData.id,
-          name: gData.name,
-          type: gData.type as 'direct' | 'group',
-          memberCount: count ?? 0,
-        })
+        setGroupInfo({ id: gData.id, name: gData.name, type: gData.type as 'direct' | 'group', memberCount: count ?? 0 })
       }
-
-      // Messages
       const { data: msgs } = await supabase
-        .from('messages')
-        .select('*')
-        .eq('group_id', groupId)
-        .eq('is_deleted', false)
-        .order('created_at', { ascending: true })
-        .limit(100)
-
+        .from('messages').select('*').eq('group_id', groupId).eq('is_deleted', false)
+        .order('created_at', { ascending: true }).limit(100)
       setMessages((msgs ?? []) as DBMessage[])
+    }
+
+    const TIMEOUTS = [4000, 8000, 12000, 12000]
+    try {
+      let lastErr: unknown = null
+      for (let i = 0; i < TIMEOUTS.length; i++) {
+        try { await withTimeout(run(), TIMEOUTS[i]); lastErr = null; break }
+        catch (e) { lastErr = e; if (i < TIMEOUTS.length - 1) await new Promise(r => setTimeout(r, 250)) }
+      }
+      if (lastErr) {
+        console.error('[chat] load failed after retries:', lastErr)
+        reportClient({ where: 'chat-load-failed', online: navigator.onLine, ...errDetail(lastErr) })
+      }
     } finally {
-      setLoading(false)
+      setLoading(false)   // תמיד — לא נתקעים על "טוען…"
     }
   }
 
