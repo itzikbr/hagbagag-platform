@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import { useAuth } from '../hooks/useAuth'
+import { useAuth, useIsAdmin } from '../hooks/useAuth'
 import Avatar from '../components/Avatar'
 
 interface GroupRow {
@@ -23,6 +23,7 @@ export default function ChatList() {
   const userId = useAuth(s => s.user?.id)
   const logout = useAuth(s => s.logout)
   const profile = useAuth(s => s.profile)
+  const isAdmin = useIsAdmin()
 
   useEffect(() => {
     if (!userId) return
@@ -178,9 +179,10 @@ export default function ChatList() {
               <path d="M4 20C4 17 7.6 15 12 15C16.4 15 20 17 20 20" stroke="rgba(255,255,255,0.8)" strokeWidth="2" strokeLinecap="round"/>
             </svg>
           </button>
-          {profile?.role === 'manager' && (
+          {isAdmin && (
             <button
               onClick={() => navigate('/admin')}
+              aria-label="ניהול מערכת"
               style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}
             >
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
