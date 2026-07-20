@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { queryWithRetry } from '../lib/dbRetry'
+import { reportClient, errDetail } from '../lib/report'
 
 // ============================================================
 // ניהול קטלוג חומרים — איציק (admin) בלבד. route: /admin/materials
@@ -36,15 +38,23 @@ export default function MaterialsAdmin() {
   const navigate = useNavigate()
   const [items, setItems] = useState<Item[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(false)
   const [flash, setFlash] = useState<string | null>(null)
   const [adding, setAdding] = useState<AddState | null>(null)
 
   const load = async () => {
-    setLoading(true)
-    const { data, error } = await supabase.from('materials_catalog')
-      .select('*').order('category_code').order('sort_order')
-    if (!error) setItems((data ?? []) as Item[])
-    setLoading(false)
+    setLoading(true); setLoadError(false)
+    try {
+      const data = await queryWithRetry<Item[]>(() => supabase.from('materials_catalog')
+        .select('*').order('category_code').order('sort_order'))
+      setItems((data ?? []) as Item[])
+    } catch (e) {
+      console.error('[materials-admin] load failed:', e)
+      reportClient({ where: 'materials-admin-load-failed', online: navigator.onLine, ...errDetail(e) })
+      setLoadError(true)
+    } finally {
+      setLoading(false)   // תמיד — כדי שלא ייתקע על "טוען…"
+    }
   }
   useEffect(() => { load() }, [])
 
@@ -117,6 +127,11 @@ export default function MaterialsAdmin() {
       <div style={{ flex: 1, overflowY: 'auto', padding: '8px 6px 24px' }} className="no-scrollbar">
         {loading ? (
           <div style={{ textAlign: 'center', color: '#888', padding: 30 }}>טוען…</div>
+        ) : loadError ? (
+          <div style={{ textAlign: 'center', padding: 30 }}>
+            <div style={{ color: RED, fontSize: 15, marginBottom: 12 }}>לא הצלחנו לטעון את הקטלוג.</div>
+            <button onClick={() => load()} style={{ background: RED, color: '#fff', border: 'none', borderRadius: 20, padding: '8px 22px', fontSize: 14, cursor: 'pointer', fontWeight: 700 }}>נסה שוב</button>
+          </div>
         ) : items.length === 0 ? (
           <div style={{ textAlign: 'center', color: '#888', padding: 30 }}>אין פריטים בקטלוג</div>
         ) : categories.map(cat => (

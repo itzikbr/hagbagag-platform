@@ -4,6 +4,8 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { DBUser } from '../types'
 import Avatar from '../components/Avatar'
+import { queryWithRetry } from '../lib/dbRetry'
+import { reportClient, errDetail } from '../lib/report'
 
 const ROLE_LABELS: Record<string, string> = {
   admin: 'אדמין',
@@ -27,6 +29,7 @@ export default function Admin() {
   const { profile } = useAuth()
   const [users, setUsers] = useState<DBUser[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [saving, setSaving] = useState<string | null>(null)
   const [showAddForm, setShowAddForm] = useState(false)
@@ -41,13 +44,20 @@ export default function Admin() {
   }, [profile])
 
   async function loadUsers() {
-    setLoading(true)
-    const { data } = await supabase
-      .from('users')
-      .select('id, username, full_name, role, avatar_url, is_active')
-      .order('full_name')
-    setUsers((data ?? []) as DBUser[])
-    setLoading(false)
+    setLoading(true); setLoadError(false)
+    try {
+      const data = await queryWithRetry<DBUser[]>(() => supabase
+        .from('users')
+        .select('id, username, full_name, role, avatar_url, is_active')
+        .order('full_name'))
+      setUsers((data ?? []) as DBUser[])
+    } catch (e) {
+      console.error('[admin] loadUsers failed:', e)
+      reportClient({ where: 'admin-users-load-failed', online: navigator.onLine, ...errDetail(e) })
+      setLoadError(true)
+    } finally {
+      setLoading(false)   // תמיד — כדי שלא ייתקע על "טוען…"
+    }
   }
 
   async function updateRole(userId: string, newRole: string) {
@@ -273,6 +283,13 @@ export default function Admin() {
 
         {loading && (
           <div style={{ padding: 32, textAlign: 'center', color: '#8696A0' }}>טוען...</div>
+        )}
+
+        {!loading && loadError && (
+          <div style={{ padding: 24, textAlign: 'center' }}>
+            <div style={{ color: '#CC0000', fontSize: 15, marginBottom: 12 }}>לא הצלחנו לטעון את המשתמשים.</div>
+            <button onClick={() => loadUsers()} style={{ background: '#CC0000', color: '#fff', border: 'none', borderRadius: 20, padding: '8px 22px', fontSize: 14, cursor: 'pointer', fontWeight: 600 }}>נסה שוב</button>
+          </div>
         )}
 
         {/* Active Users */}
