@@ -17,6 +17,7 @@ import GeminiChat from './pages/GeminiChat'
 import MaterialsAdmin from './pages/MaterialsAdmin'
 import BottomNav from './components/BottomNav'
 import HubButton from './components/HubButton'
+import ErrorBoundary from './components/ErrorBoundary'
 
 function Splash() {
   return (
@@ -61,6 +62,7 @@ function PlatformLayout() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
       <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
+        <ErrorBoundary name="platform">
         <Routes>
           <Route path="/"          element={<Navigate to="/sheets" replace />} />
           {/* דפי ביצוע — פתוח לכל משתמש מחובר */}
@@ -80,6 +82,7 @@ function PlatformLayout() {
           <Route path="/gemini"    element={<RequireAdmin><GeminiChat /></RequireAdmin>} />
           <Route path="*"          element={<Navigate to="/sheets" replace />} />
         </Routes>
+        </ErrorBoundary>
       </div>
       {!hideNav && <BottomNav activeTab={activeTab} onTabChange={setActiveTab} />}
       {isAdmin && location.pathname === '/gemini' && <HubButton />}

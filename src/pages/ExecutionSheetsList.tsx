@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth, useIsAdmin } from '../hooks/useAuth'
+import { reportClient, errDetail } from '../lib/report'
 
 // ── טיפוסים ────────────────────────────────────────────────────
 interface BuildingRow { work_content?: { details?: { customerName?: string; address?: string; orderNumber?: string } } }
@@ -84,18 +85,6 @@ const BADGE: Record<DecoratedSheet['when'], { bg: string; color: string }> = {
   today:  { bg: RED,       color: '#fff' },
   future: { bg: '#EEF2FF', color: BLUE },
   none:   { bg: '#EEE',    color: GREY },
-}
-
-// דיווח beacon לשרת (gemini-server → journald). fire-and-forget, לא חוסם ולא זורק.
-function reportClient(payload: Record<string, unknown>) {
-  try {
-    fetch('/gemini-api/client-log', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...payload, ua: navigator.userAgent.slice(0, 120), t: new Date().toISOString() }),
-      keepalive: true,
-    }).catch(() => { /* noop */ })
-  } catch { /* noop */ }
 }
 
 export default function ExecutionSheetsList() {
@@ -198,7 +187,7 @@ export default function ExecutionSheetsList() {
 
       if (lastErr) {
         console.error('[sheets] loadSheets failed after retries:', lastErr)
-        reportClient({ where: 'sheets-load-failed', attempts: usedAttempts, ms: Date.now() - t0, online: navigator.onLine, background, msg: String((lastErr as Error)?.message ?? lastErr).slice(0, 200) })
+        reportClient({ where: 'sheets-load-failed', attempts: usedAttempts, ms: Date.now() - t0, online: navigator.onLine, background, ...errDetail(lastErr) })
         if (!loadedOnce.current) setError('לא הצלחנו לטעון את דפי הביצוע. נסה שוב.')
       } else {
         if (usedAttempts > 1) reportClient({ where: 'sheets-load-recovered', attempts: usedAttempts, ms: Date.now() - t0, online: navigator.onLine, background })

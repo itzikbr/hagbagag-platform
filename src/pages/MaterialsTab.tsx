@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { reportClient, errDetail } from '../lib/report'
 
 // ============================================================
 // לשונית חומרים חכמה — מבוססת materials_catalog + materials_defaults.
@@ -91,20 +92,33 @@ export default function MaterialsTab({ workTypes, value, onChange }: Props) {
 
   const roofActive = workTypes.includes('roofReplace')
 
-  // טעינת קטלוג + ברירות מחדל
+  // טעינת קטלוג + ברירות מחדל — מבודד ב-try/catch עם לוג מפורט.
+  // כשל כאן משפיע רק על לשונית החומרים; הוא לעולם לא זולג החוצה (וגם ככה
+  // המסך הזה נטען רק בתוך עורך הדף, לא ברשימת דפי הביצוע).
   useEffect(() => {
     let cancelled = false
     ;(async () => {
-      const [cat, def] = await Promise.all([
-        supabase.from('materials_catalog').select('category_code,category_name,item_code,name,is_default,sort_order').eq('is_active', true).order('category_code').order('sort_order'),
-        supabase.from('materials_defaults').select('work_type,roof_type,material_item_code,sort_order').order('sort_order'),
-      ])
-      if (cancelled) return
-      if (cat.error || def.error) { setLoadErr(true); setLoaded(true); return }
-      setCatalog((cat.data ?? []) as CatalogItem[])
-      setDefaults((def.data ?? []) as DefaultRow[])
-      setLoaded(true)
-    })().catch(() => { if (!cancelled) { setLoadErr(true); setLoaded(true) } })
+      try {
+        const cat = await supabase.from('materials_catalog')
+          .select('category_code,category_name,item_code,name,is_default,sort_order')
+          .eq('is_active', true).order('category_code').order('sort_order')
+        if (cat.error) { reportClient({ where: 'materials-catalog-query', online: navigator.onLine, ...errDetail(cat.error) }); throw cat.error }
+
+        const def = await supabase.from('materials_defaults')
+          .select('work_type,roof_type,material_item_code,sort_order').order('sort_order')
+        if (def.error) { reportClient({ where: 'materials-defaults-query', online: navigator.onLine, ...errDetail(def.error) }); throw def.error }
+
+        if (cancelled) return
+        setCatalog((cat.data ?? []) as CatalogItem[])
+        setDefaults((def.data ?? []) as DefaultRow[])
+        setLoaded(true)
+      } catch (e) {
+        if (cancelled) return
+        console.error('[materials] load failed:', e)
+        reportClient({ where: 'materials-load-failed', online: navigator.onLine, ...errDetail(e) })
+        setLoadErr(true); setLoaded(true)   // מציג "טעינת הקטלוג נכשלה" — לא מפיל כלום
+      }
+    })()
     return () => { cancelled = true }
   }, [])
 
