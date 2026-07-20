@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>שדות בחירה — דף ביצוע</title>
+<style>
+  :root { --red:#CC0000; --bg:#f0ebe4; --card:#fff; --line:#e3ded7; --muted:#8A8A8A; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:#2b2b2b; direction:rtl;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,"Noto Sans Hebrew",sans-serif; }
+  header { background:var(--red); color:#fff; padding:18px 16px; position:sticky; top:0; z-index:5; }
+  header h1 { margin:0; font-size:20px; font-weight:800; }
+  header p { margin:4px 0 0; font-size:13px; opacity:.85; }
+  main { max-width:820px; margin:0 auto; padding:16px 12px 40px; }
+  h2 { font-size:16px; color:var(--red); margin:22px 6px 8px; font-weight:800; }
+  h3 { font-size:13px; color:#555; margin:14px 6px 6px; font-weight:700; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px;
+    padding:6px 14px; margin:8px 4px; box-shadow:0 1px 3px rgba(0,0,0,.05); }
+  .field { padding:10px 0; border-top:1px solid #f2efe9; }
+  .field:first-child { border-top:none; }
+  .flabel { font-weight:700; font-size:15px; display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+  .cond { font-size:12px; color:var(--muted); font-weight:500; }
+  .other { background:#FFF0F0; color:var(--red); border:1px solid #FFBBBB; border-radius:10px;
+    font-size:11px; font-weight:700; padding:1px 7px; }
+  .opts { margin-top:7px; display:flex; flex-wrap:wrap; gap:6px; }
+  .opt { background:#f2eee8; border:1px solid var(--line); border-radius:14px;
+    padding:3px 10px; font-size:12.5px; color:#444; }
+  .opt.o { background:#fff; border-style:dashed; color:var(--red); }
+  .empty { color:var(--muted); font-size:13px; padding:10px 6px; }
+  footer { text-align:center; color:var(--muted); font-size:12px; padding:20px; }
+  .count { background:rgba(255,255,255,.2); border-radius:12px; padding:2px 9px; font-size:12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>⚙️ שדות בחירה — דף ביצוע</h1>
+  <p>כל התפריטים הנפתחים (dropdown/select) לפי לשונית · <span class="count">32 שדות</span></p>
+</header>
+<main>
+
+  <h2>לשונית פרטים</h2>
+  <h3>כרטיס "פרטים"</h3>
+  <div class="card">
+    <div class="field"><div class="flabel">1. ממלא הדף</div>
+      <div class="opts"><span class="opt">עמאד</span><span class="opt">סמיר</span><span class="opt">עלי</span><span class="opt">אסף</span><span class="opt">דליה</span><span class="opt">מוטי</span><span class="opt">איציק</span><span class="opt">סים</span><span class="opt">אוריה</span><span class="opt">קלוד</span></div>
+    </div>
+  </div>
+  <h3>כרטיס "מאפיינים כלליים"</h3>
+  <div class="card">
+    <div class="field"><div class="flabel">2. גובה גג</div><div class="opts"><span class="opt">נמוך עד 3מ׳</span><span class="opt">בינוני 3-6מ׳</span><span class="opt">גבוה 6מ׳+</span></div></div>
+    <div class="field"><div class="flabel">3. סוג גג <span class="other">אחר</span></div><div class="opts"><span class="opt">חד שיפועי</span><span class="opt">דו שיפועי</span><span class="opt">רב שיפועי</span><span class="opt o">אחר</span></div></div>
+    <div class="field"><div class="flabel">4. קונסטרוקציה <span class="other">אחר</span></div><div class="opts"><span class="opt">עץ</span><span class="opt">מתכת</span><span class="opt o">אחר</span></div></div>
+  </div>
+  <h3>כרטיס "לוגיסטיקה"</h3>
+  <div class="card">
+    <div class="field"><div class="flabel">5. מנוף <span class="other">אחר</span></div><div class="opts"><span class="opt">לא נדרש</span><span class="opt">קצר</span><span class="opt">ארוך</span><span class="opt o">אחר</span></div></div>
+    <div class="field"><div class="flabel">6. מכולה</div><div class="opts"><span class="opt">לא נדרש</span><span class="opt">10m³</span><span class="opt">20m³</span><span class="opt">30m³</span></div></div>
+    <div class="field"><div class="flabel">7. במת הרמה</div><div class="opts"><span class="opt">לא נדרש</span><span class="opt">דיזל</span><span class="opt">חשמלית</span></div></div>
+    <div class="field"><div class="flabel">8. זרוע/מספריים</div><div class="opts"><span class="opt">לא נדרש</span><span class="opt">מספריים</span><span class="opt">זרוע</span></div></div>
+    <div class="field"><div class="flabel">9. גישה לאתר</div><div class="opts"><span class="opt">קלה</span><span class="opt">מוגבלת</span><span class="opt">קשה</span><span class="opt">ללא גישה</span></div></div>
+  </div>
+
+  <h2>בלוקי סוג עבודה <span class="cond">(בלשונית פרטים, לפי הנבחר)</span></h2>
+  <h3>החלפת אסבסט (לכל מבנה)</h3>
+  <div class="card">
+    <div class="field"><div class="flabel">10. סוג מבנה <span class="other">אחר</span></div><div class="opts"><span class="opt">סככה פתוחה</span><span class="opt">סככה סגורה</span><span class="opt">מגורים</span><span class="opt">מחסן</span><span class="opt o">אחר</span></div></div>
+    <div class="field"><div class="flabel">11. קונסטרוקציה <span class="other">אחר</span></div><div class="opts"><span class="opt">בטון</span><span class="opt">מתכת</span><span class="opt">עץ</span><span class="opt o">אחר</span></div></div>
+    <div class="field"><div class="flabel">12. סוג תקרה <span class="cond">(כשיש תקרה)</span> <span class="other">אחר</span></div><div class="opts"><span class="opt">בטון</span><span class="opt">רביץ</span><span class="opt">גבס</span><span class="opt">צפה</span><span class="opt o">אחר</span></div></div>
+    <div class="field"><div class="flabel">13. סוג אסבסט-משנה <span class="cond">(כש"אחר")</span> <span class="other">אחר</span></div><div class="opts"><span class="opt">קנלטות</span><span class="opt">מוקצף</span><span class="opt o">אחר</span></div></div>
+  </div>
+  <h3>החלפת גג</h3>
+  <div class="card">
+    <div class="field"><div class="flabel">14. גג קיים <span class="other">אחר</span></div><div class="opts"><span class="opt">איסכורית</span><span class="opt">אסבסט</span><span class="opt">רעפים</span><span class="opt">פנלים</span><span class="opt">שינגלס</span><span class="opt o">אחר</span></div></div>
+    <div class="field"><div class="flabel">15. גג חדש <span class="other">אחר</span></div><div class="opts"><span class="opt">איסכורית</span><span class="opt">פנל מבודד</span><span class="opt">רעפים</span><span class="opt">שינגלס</span><span class="opt o">אחר</span></div></div>
+    <div class="field"><div class="flabel">16. קונסטרוקציה <span class="other">אחר</span></div><div class="opts"><span class="opt">עץ</span><span class="opt">מתכת</span><span class="opt o">אחר</span></div></div>
+    <div class="field"><div class="flabel">17. עובי פח <span class="cond">(איסכורית)</span></div><div class="opts"><span class="opt">0.4</span><span class="opt">0.5</span><span class="opt">0.55</span><span class="opt">0.6</span><span class="opt">0.75</span></div></div>
+    <div class="field"><div class="flabel">18. צבע <span class="cond">(איסכורית)</span> <span class="other">אחר</span></div><div class="opts"><span class="opt">לבן</span><span class="opt">שנהב</span><span class="opt">אדום רעפים</span><span class="opt">חום</span><span class="opt">אפור בהיר</span><span class="opt">אפור כהה</span><span class="opt">ירוק</span><span class="opt">כחול</span><span class="opt">גלוון</span><span class="opt o">אחר</span></div></div>
+    <div class="field"><div class="flabel">19. עובי פח עליון <span class="cond">(פנל מבודד)</span></div><div class="opts"><span class="opt">0.4</span><span class="opt">0.5</span><span class="opt">0.55</span><span class="opt">0.6</span><span class="opt">0.75</span></div></div>
+    <div class="field"><div class="flabel">20. עובי פח תחתון <span class="cond">(פנל מבודד)</span></div><div class="opts"><span class="opt">0.4</span><span class="opt">0.5</span><span class="opt">0.55</span><span class="opt">0.6</span><span class="opt">0.75</span></div></div>
+    <div class="field"><div class="flabel">21. סוג מילוי <span class="cond">(פנל מבודד)</span> <span class="other">אחר</span></div><div class="opts"><span class="opt">פוליסטירן</span><span class="opt">צמר סלעים</span><span class="opt">פוליסטירן מחוזק</span><span class="opt o">אחר</span></div></div>
+    <div class="field"><div class="flabel">22. צבע <span class="cond">(פנל מבודד — כמו #18)</span> <span class="other">אחר</span></div><div class="opts"><span class="opt">לבן</span><span class="opt">שנהב</span><span class="opt">אדום רעפים</span><span class="opt">חום</span><span class="opt">אפור בהיר</span><span class="opt">אפור כהה</span><span class="opt">ירוק</span><span class="opt">כחול</span><span class="opt">גלוון</span><span class="opt o">אחר</span></div></div>
+    <div class="field"><div class="flabel">23. סוג רעף <span class="cond">(רעפים)</span> <span class="other">אחר</span></div><div class="opts"><span class="opt">חרס</span><span class="opt">אקרשטיין</span><span class="opt o">אחר</span></div></div>
+  </div>
+  <h3>ציפוי אלומיניום</h3>
+  <div class="card">
+    <div class="field"><div class="flabel">24. גוון <span class="other">אחר</span></div><div class="opts"><span class="opt">חום</span><span class="opt">פולי סנדר</span><span class="opt">מהגוני</span><span class="opt">לבן</span><span class="opt">קרם</span><span class="opt">אפור</span><span class="opt">ירוק</span><span class="opt o">אחר</span></div></div>
+  </div>
+  <h3>מרזבים</h3>
+  <div class="card">
+    <div class="field"><div class="flabel">25. סוג <span class="other">אחר</span></div><div class="opts"><span class="opt">חיצוני</span><span class="opt">פנימי</span><span class="opt">חיצוני ופנימי</span><span class="opt o">אחר</span></div></div>
+  </div>
+  <h3>בידוד</h3>
+  <div class="card">
+    <div class="field"><div class="flabel">26. סוג <span class="other">אחר</span></div><div class="opts"><span class="opt">רדיד אלומיניום</span><span class="opt">צמר סלעים</span><span class="opt">צמר זכוכית</span><span class="opt o">אחר</span></div></div>
+    <div class="field"><div class="flabel">27. עובי <span class="other">אחר</span></div><div class="opts"><span class="opt">5 סמ</span><span class="opt">8 סמ</span><span class="opt">10 סמ</span><span class="opt">12 סמ</span><span class="opt o">אחר</span></div></div>
+  </div>
+
+  <h2>לשונית תיעוד</h2>
+  <div class="card"><div class="empty">אין תפריטים נפתחים (העלאת קבצים בלבד).</div></div>
+
+  <h2>לשונית חומרים</h2>
+  <div class="card">
+    <div class="field"><div class="flabel">28. סוג קירוי <span class="cond">(רק ב"החלפת גג")</span></div><div class="opts"><span class="opt">פנל מבודד</span><span class="opt">איסכורית</span><span class="opt">רעפים</span></div></div>
+  </div>
+
+  <h2>לשונית התקדמות 🚦</h2>
+  <div class="card">
+    <div class="field"><div class="flabel">29. מפקח <span class="cond">(היתר אסבסט)</span></div><div class="opts"><span class="opt">עמאד</span><span class="opt">סמיר</span><span class="opt">עלי</span><span class="opt">אסף</span><span class="opt">איציק</span></div></div>
+    <div class="field"><div class="flabel">30. ספקים <span class="cond">(דינמי)</span> <span class="other">אחר</span></div>
+      <div class="cond" style="margin-top:6px">קירוי:</div>
+      <div class="opts"><span class="opt">הגן הנדסה</span><span class="opt">אופק</span><span class="opt">פוליפח</span><span class="opt">א.ד פלדות</span><span class="opt">מבנה דרום</span><span class="opt o">אחר</span></div>
+      <div class="cond" style="margin-top:6px">כללי:</div>
+      <div class="opts"><span class="opt">הגן הנדסה</span><span class="opt">אופק</span><span class="opt">פוליפח</span><span class="opt">א.ד פלדות</span><span class="opt">מבנה דרום</span><span class="opt">אחים שחם</span><span class="opt">כראדי</span><span class="opt">פסקל</span><span class="opt">מטלום</span><span class="opt">עץ ועצה</span><span class="opt">אלי לבן</span><span class="opt">נוימן</span><span class="opt o">אחר</span></div>
+    </div>
+    <div class="field"><div class="flabel">31. ראש צוות</div><div class="opts"><span class="opt">עמאד</span><span class="opt">סמיר</span><span class="opt">עלי</span></div></div>
+    <div class="field"><div class="flabel">32. קבלן משנה <span class="other">אחר</span></div><div class="opts"><span class="opt">זכי</span><span class="opt">מאלק</span><span class="opt">חאזם</span><span class="opt">וויסאם</span><span class="opt">מחמוד</span><span class="opt">האני</span><span class="opt">גל</span><span class="opt o">אחר</span></div></div>
+  </div>
+
+  <footer>
+    נוצר 2026-07-20 · מקור: NewExecutionSheet.tsx + MaterialsTab.tsx<br>
+    <span class="other" style="display:inline-block;margin-top:6px">אחר</span> = שדה כולל אפשרות "אחר" חופשית
+  </footer>
+</main>
+</body>
+</html>
