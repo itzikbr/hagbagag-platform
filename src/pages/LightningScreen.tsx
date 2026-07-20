@@ -251,6 +251,18 @@ export default function LightningScreen() {
             <span style={{ color: '#fff', fontWeight: 700, fontSize: 21 }}>⚡ שלום איציק</span>
           </div>
 
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {/* כפתור ניהול מערכת → /admin */}
+          <button
+            onClick={() => navigate('/admin')}
+            aria-label="ניהול מערכת"
+            style={{
+              width: 40, height: 40, borderRadius: '50%',
+              background: 'rgba(255,255,255,0.18)', border: 'none', cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, lineHeight: 1,
+            }}
+          >⚙️</button>
+
           {/* כפתור רענן עגול — רענון ברקע, משאיר את ה-cache המוצג */}
           <button
             onClick={() => fetchBrief(!!briefData)}
@@ -271,6 +283,7 @@ export default function LightningScreen() {
               <path d="M21 3v6h-6" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </button>
+          </div>
         </div>
         <div style={{ color: 'rgba(255,255,255,0.85)', fontSize: 13, marginTop: 6 }}>
           {loading ? (briefData ? 'מרענן ברקע…' : 'מרענן…') : `עודכן ${lastUpdated}`}

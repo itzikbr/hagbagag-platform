@@ -12,6 +12,7 @@ import NewExecutionSheet from './pages/NewExecutionSheet'
 import ExecutionSheetView from './pages/ExecutionSheetView'
 import Contacts from './pages/Contacts'
 import Admin from './pages/Admin'
+import AdminDashboard from './pages/AdminDashboard'
 import LightningScreen from './pages/LightningScreen'
 import GeminiChat from './pages/GeminiChat'
 import MaterialsAdmin from './pages/MaterialsAdmin'
@@ -76,7 +77,8 @@ function PlatformLayout() {
           <Route path="/new-chat"  element={<RequireAdmin><NewChat /></RequireAdmin>} />
           <Route path="/new-group" element={<RequireAdmin><NewGroup /></RequireAdmin>} />
           <Route path="/contacts"  element={<RequireAdmin><Contacts /></RequireAdmin>} />
-          <Route path="/admin"     element={<RequireAdmin><Admin /></RequireAdmin>} />
+          <Route path="/admin"          element={<RequireAdmin><AdminDashboard /></RequireAdmin>} />
+          <Route path="/admin/users"     element={<RequireAdmin><Admin /></RequireAdmin>} />
           <Route path="/admin/materials" element={<RequireAdmin><MaterialsAdmin /></RequireAdmin>} />
           <Route path="/itzik"     element={<RequireAdmin><LightningScreen /></RequireAdmin>} />
           <Route path="/gemini"    element={<RequireAdmin><GeminiChat /></RequireAdmin>} />

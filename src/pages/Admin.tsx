@@ -170,27 +170,19 @@ export default function Admin() {
       {/* Header */}
       <div style={{ background: '#CC0000', padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <button onClick={() => navigate('/chats')} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
+          <button onClick={() => navigate('/admin')} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
               <path d="M15 18L9 12L15 6" stroke="#fff" strokeWidth="2.5" strokeLinecap="round"/>
             </svg>
           </button>
           <span style={{ color: '#fff', fontWeight: 600, fontSize: 18 }}>ניהול משתמשים</span>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button
-            onClick={() => navigate('/admin/materials')}
-            style={{ background: 'rgba(255,255,255,0.2)', border: 'none', borderRadius: 20, padding: '6px 14px', color: '#fff', fontSize: 14, cursor: 'pointer', fontWeight: 600 }}
-          >
-            🧱 קטלוג חומרים
-          </button>
-          <button
-            onClick={() => { setShowAddForm(!showAddForm); setAddMsg('') }}
-            style={{ background: 'rgba(255,255,255,0.2)', border: 'none', borderRadius: 20, padding: '6px 14px', color: '#fff', fontSize: 14, cursor: 'pointer', fontWeight: 600 }}
-          >
-            {showAddForm ? 'ביטול' : '+ הוסף'}
-          </button>
-        </div>
+        <button
+          onClick={() => { setShowAddForm(!showAddForm); setAddMsg('') }}
+          style={{ background: 'rgba(255,255,255,0.2)', border: 'none', borderRadius: 20, padding: '6px 14px', color: '#fff', fontSize: 14, cursor: 'pointer', fontWeight: 600 }}
+        >
+          {showAddForm ? 'ביטול' : '+ הוסף'}
+        </button>
       </div>
 
       <div style={{ flex: 1, overflowY: 'auto', background: '#F0F2F5' }} className="no-scrollbar">
