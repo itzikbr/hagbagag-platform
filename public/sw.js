@@ -3,7 +3,7 @@
 // אחראי על: Push Notifications + Cache (offline basic)
 // ============================================================
 
-const CACHE_NAME = 'hagbagag-v7'
+const CACHE_NAME = 'hagbagag-v8'
 const OFFLINE_FALLBACK = '/offline.html'
 
 // קבצים לשמירה בקאש ראשוני
@@ -36,23 +36,53 @@ self.addEventListener('activate', event => {
   })())
 })
 
-// ── Fetch — Network First, Cache Fallback ──
+// ── Fetch ──
+// אסטרטגיה מוקשחת נגד "shell ישן שמצביע על assets שנמחקו":
+//  • ניווטים (HTML): network-first תמיד → אונליין מקבל index.html טרי עם ה-hash
+//    הנוכחי (שקיים בשרת). נפילה ל-shell מהקאש רק כשאין רשת.
+//  • /assets/* (גיבוב, immutable): cache-first — מהיר ובטוח (תוכן קבוע לכל hash).
+//  • שאר GET מאותו origin: network-first עם נפילה לקאש.
 self.addEventListener('fetch', event => {
-  // דלג על בקשות non-GET ו-supabase API
-  if (event.request.method !== 'GET') return
-  if (event.request.url.includes('supabase.co')) return
+  const req = event.request
+  if (req.method !== 'GET') return
+  const url = new URL(req.url)
+  if (url.origin !== self.location.origin) return   // supabase / חיצוני — לא מטופל ע"י ה-SW
 
+  // ניווטי דפים — network-first, נפילה ל-shell/offline רק באין רשת
+  if (req.mode === 'navigate') {
+    event.respondWith((async () => {
+      try {
+        const fresh = await fetch(req)
+        const cache = await caches.open(CACHE_NAME)
+        cache.put('/', fresh.clone())
+        return fresh
+      } catch {
+        return (await caches.match('/')) || (await caches.match(OFFLINE_FALLBACK)) || Response.error()
+      }
+    })())
+    return
+  }
+
+  // assets בגיבוב — cache-first
+  if (url.pathname.startsWith('/assets/')) {
+    event.respondWith((async () => {
+      const cached = await caches.match(req)
+      if (cached) return cached
+      const fresh = await fetch(req)
+      if (fresh.ok) { const cache = await caches.open(CACHE_NAME); cache.put(req, fresh.clone()) }
+      return fresh
+    })())
+    return
+  }
+
+  // שאר בקשות GET מקומיות — network-first
   event.respondWith(
-    fetch(event.request)
+    fetch(req)
       .then(response => {
-        // שמור בקאש אם הצליח
-        if (response.ok) {
-          const clone = response.clone()
-          caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone))
-        }
+        if (response.ok) { const clone = response.clone(); caches.open(CACHE_NAME).then(cache => cache.put(req, clone)) }
         return response
       })
-      .catch(() => caches.match(event.request))
+      .catch(() => caches.match(req))
   )
 })
 
