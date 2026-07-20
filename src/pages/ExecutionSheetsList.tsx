@@ -164,7 +164,7 @@ export default function ExecutionSheetsList() {
 
       if (error) {
         console.error('[sheets] query error:', error)
-        if (!loadedOnce.current && seq === reqSeq.current) setError('שגיאה בטעינת דפי הביצוע')
+        if (!loadedOnce.current) setError('שגיאה בטעינת דפי הביצוע: ' + (error.message || ''))
       } else if (seq > appliedSeq.current) {
         appliedSeq.current = seq
         setSheets((data ?? []) as SheetRow[])
@@ -173,15 +173,14 @@ export default function ExecutionSheetsList() {
       }
     } catch (e) {
       console.error('[sheets] loadSheets failed:', e)
-      if (aliveRef.current && !loadedOnce.current && seq === reqSeq.current) {
+      if (aliveRef.current && !loadedOnce.current) {
         setError('לא הצלחנו לטעון את דפי הביצוע. בדוק את החיבור ונסה שוב.')
       }
     } finally {
       clearTimeout(timer)
-      if (aliveRef.current && (seq === reqSeq.current || loadedOnce.current)) {
-        setLoading(false)
-        initialDoneRef.current = true
-      }
+      // תמיד מכבים את הספינר בסיום ניסיון foreground — כדי שלא נתקע לנצח על "טוען…",
+      // גם אם הקריאה הראשונית נכשלה או נעקפה ע"י רענון רקע (race על reqSeq).
+      if (aliveRef.current && !background) { setLoading(false); initialDoneRef.current = true }
     }
   }
 
