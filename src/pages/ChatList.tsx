@@ -186,8 +186,8 @@ export default function ChatList() {
               style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}
             >
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-                <circle cx="12" cy="12" r="3" stroke="#6b7280" strokeWidth="2"/>
-                <path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" stroke="#6b7280" strokeWidth="2" strokeLinecap="round"/>
+                <circle cx="12" cy="12" r="3" stroke="#444444" strokeWidth="2"/>
+                <path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" stroke="#444444" strokeWidth="2" strokeLinecap="round"/>
               </svg>
             </button>
           )}
