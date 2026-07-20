@@ -144,42 +144,54 @@ export default function ExecutionSheetsList() {
     }
   }, [])
 
-  async function loadSheets({ background = false }: { background?: boolean } = {}) {
-    const seq = ++reqSeq.current
-    if (!background) { setLoading(true); setError(null) }
-
+  // ניסיון בודד לשאילתה, עם timeout. זורק על שגיאה/פג-זמן.
+  async function fetchSheetsOnce(): Promise<SheetRow[]> {
     let timer: ReturnType<typeof setTimeout> | undefined
-    const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('timeout')), 12000) })
-
+    const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('timeout')), 10000) })
     try {
       const query = supabase
         .from('execution_sheets')
         .select('id, project_name, is_archived, filled_by_name, progress_data, buildings(work_content)')
         .order('created_at', { ascending: false })
-
       const { data, error } = await Promise.race([query, timeout]) as
         { data: SheetRow[] | null; error: { message: string } | null }
+      if (error) throw new Error(error.message || 'query error')
+      return (data ?? []) as SheetRow[]
+    } finally {
+      clearTimeout(timer)
+    }
+  }
 
+  async function loadSheets({ background = false }: { background?: boolean } = {}) {
+    const seq = ++reqSeq.current
+    if (!background) { setLoading(true); setError(null) }
+
+    try {
+      // כשל לסירוגין (למשל stall של רענון token ב-supabase-js, בעיקר ב-PWA של iOS)
+      // נפתר ברֶטרי — עד 3 ניסיונות עם השהיה גוברת לפני שמכריזים על שגיאה.
+      let data: SheetRow[] | null = null
+      let lastErr: unknown = null
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try { data = await fetchSheetsOnce(); lastErr = null; break }
+        catch (e) {
+          lastErr = e
+          console.warn(`[sheets] attempt ${attempt + 1} failed:`, e)
+          if (attempt < 2) await new Promise(r => setTimeout(r, 500 * (attempt + 1)))
+        }
+      }
       if (!aliveRef.current) return
 
-      if (error) {
-        console.error('[sheets] query error:', error)
-        if (!loadedOnce.current) setError('שגיאה בטעינת דפי הביצוע: ' + (error.message || ''))
+      if (lastErr) {
+        console.error('[sheets] loadSheets failed after retries:', lastErr)
+        if (!loadedOnce.current) setError('לא הצלחנו לטעון את דפי הביצוע. נסה שוב.')
       } else if (seq > appliedSeq.current) {
         appliedSeq.current = seq
-        setSheets((data ?? []) as SheetRow[])
+        setSheets(data ?? [])
         setError(null)
         loadedOnce.current = true
       }
-    } catch (e) {
-      console.error('[sheets] loadSheets failed:', e)
-      if (aliveRef.current && !loadedOnce.current) {
-        setError('לא הצלחנו לטעון את דפי הביצוע. בדוק את החיבור ונסה שוב.')
-      }
     } finally {
-      clearTimeout(timer)
-      // תמיד מכבים את הספינר בסיום ניסיון foreground — כדי שלא נתקע לנצח על "טוען…",
-      // גם אם הקריאה הראשונית נכשלה או נעקפה ע"י רענון רקע (race על reqSeq).
+      // תמיד מכבים את הספינר בסיום ניסיון foreground — כדי שלא נתקע לנצח על "טוען…".
       if (aliveRef.current && !background) { setLoading(false); initialDoneRef.current = true }
     }
   }
