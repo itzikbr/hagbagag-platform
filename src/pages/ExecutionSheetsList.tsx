@@ -345,14 +345,14 @@ export default function ExecutionSheetsList() {
               boxShadow: filterOpen ? '0 0 0 3px rgba(204,0,0,0.25)' : '0 1px 3px rgba(0,0,0,0.2)',
             }}>
             👥
-            {selectedFillers.length > 0 && (
-              <span style={{
-                position: 'absolute', top: -4, right: -4, minWidth: 18, height: 18, borderRadius: 9,
-                background: '#fff', color: RED, border: `2px solid ${RED}`, fontSize: 11, fontWeight: 800,
-                display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 3px',
-                fontVariantNumeric: 'tabular-nums',
-              }}>{selectedFillers.length}</span>
-            )}
+            {/* הבאדג' מציג את מספר דפי הביצוע המוצגים כרגע (אחרי הסינון) —
+                תמיד מוצג: ב"הכל" זה הסך הכולל, ובסינון זה ה-X מתוך "מציג X מתוך Y". */}
+            <span style={{
+              position: 'absolute', top: -4, right: -4, minWidth: 18, height: 18, borderRadius: 9,
+              background: '#fff', color: RED, border: `2px solid ${RED}`, fontSize: 11, fontWeight: 800,
+              display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 3px',
+              fontVariantNumeric: 'tabular-nums',
+            }}>{filtered.length}</span>
           </button>
 
           {filterOpen && (
