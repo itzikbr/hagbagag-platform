@@ -53,7 +53,11 @@ export default function ChatConversation() {
   const [messages, setMessages] = useState<DBMessage[]>([])
   const [text, setText] = useState('')
   const [uploading, setUploading] = useState(false)
+  const [pending, setPending] = useState<{ file: File; url: string }[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const pendingRef = useRef(pending); pendingRef.current = pending
+  // ניקוי object URLs של תצוגה מקדימה ביציאה מהמסך
+  useEffect(() => () => { pendingRef.current.forEach(p => URL.revokeObjectURL(p.url)) }, [])
   const [loading, setLoading] = useState(true)
   const bottomRef = useRef<HTMLDivElement>(null)
   const [showPanel, setShowPanel] = useState(false)
@@ -147,42 +151,46 @@ export default function ChatConversation() {
     // Realtime subscription will add the new message automatically
   }
 
-  // העלאת תמונה/קובץ ל-Supabase Storage (bucket ציבורי chat-files) + הודעה
-  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    e.target.value = ''  // מאפשר לבחור שוב אותו קובץ
-    if (!file || !groupId || !user || !profile || uploading) return
+  // בחירת תמונות (רב-בחירה) → נכנסות ל-pending לתצוגה מקדימה, בלי העלאה עדיין
+  const pickImages = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? [])
+    e.target.value = ''  // מאפשר לבחור שוב אותם קבצים
+    if (!files.length) return
+    setPending(prev => [...prev, ...files.map(f => ({ file: f, url: URL.createObjectURL(f) }))])
+  }
+
+  const removePending = (i: number) => setPending(prev => {
+    const it = prev[i]; if (it) URL.revokeObjectURL(it.url)
+    return prev.filter((_, j) => j !== i)
+  })
+
+  // שליחה: מעלה את כל התמונות שנבחרו יחד (כיווץ 1200px/JPEG80% לכל אחת), ורק אז
+  const sendPending = async () => {
+    if (!pending.length || !groupId || !user || !profile || uploading) return
+    const items = pending
     setUploading(true)
     try {
-      const isImage = (file.type || '').startsWith('image/')
-      // תמונות: כיווץ ל-1200px רוחב + JPEG 80% לפני העלאה (מקטין משמעותית זמן העלאה)
-      let upload: Blob = file
-      let ext = (file.name.split('.').pop() || 'bin').toLowerCase().replace(/[^a-z0-9]/g, '')
-      let contentType = file.type || undefined
-      if (isImage) {
+      for (const { file } of items) {
+        let upload: Blob = file, ext = 'jpg', contentType: string | undefined = 'image/jpeg'
         const compressed = await downscaleImage(file, 1200, 0.8).catch(() => null)
-        if (compressed) { upload = compressed; ext = 'jpg'; contentType = 'image/jpeg' }
+        if (compressed) { upload = compressed }
+        else { ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, ''); contentType = file.type || undefined; upload = file }
+        const rand = (crypto.randomUUID?.() ?? Math.random().toString(36).slice(2))
+        const path = `${groupId}/${rand}.${ext}`
+        const { error: upErr } = await supabase.storage.from('chat-files').upload(path, upload, { contentType })
+        if (upErr) throw upErr
+        const { data: pub } = supabase.storage.from('chat-files').getPublicUrl(path)
+        const { error: msgErr } = await supabase.from('messages').insert({
+          group_id: groupId, sender_id: user.id, sender_name: profile.full_name,
+          content: '', message_type: 'image', file_url: pub.publicUrl, file_name: file.name, file_size: upload.size,
+        })
+        if (msgErr) throw msgErr
       }
-      const rand = (crypto.randomUUID?.() ?? Math.random().toString(36).slice(2))
-      const path = `${groupId}/${rand}.${ext}`
-      const { error: upErr } = await supabase.storage.from('chat-files').upload(path, upload, { contentType })
-      if (upErr) throw upErr
-      const { data: pub } = supabase.storage.from('chat-files').getPublicUrl(path)
-      const { error: msgErr } = await supabase.from('messages').insert({
-        group_id: groupId,
-        sender_id: user.id,
-        sender_name: profile.full_name,
-        content: isImage ? '' : file.name,
-        message_type: isImage ? 'image' : 'file',
-        file_url: pub.publicUrl,
-        file_name: file.name,
-        file_size: upload.size,
-      })
-      if (msgErr) throw msgErr
-      // Realtime subscription יוסיף את ההודעה
+      items.forEach(it => URL.revokeObjectURL(it.url))
+      setPending([])
     } catch (err) {
-      console.error('שגיאה בהעלאת קובץ:', err)
-      setToast('העלאת הקובץ נכשלה')
+      console.error('שגיאה בהעלאת תמונות:', err)
+      setToast('העלאת התמונות נכשלה')
       setTimeout(() => setToast(null), 2200)
     } finally {
       setUploading(false)
@@ -363,17 +371,30 @@ export default function ChatConversation() {
         <div ref={bottomRef} />
       </div>
 
+      {/* תצוגה מקדימה של התמונות שנבחרו — לפני שליחה */}
+      {pending.length > 0 && (
+        <div style={{ background: '#F0F2F5', padding: '8px 12px 0', display: 'flex', gap: 8, overflowX: 'auto', flexShrink: 0 }} className="no-scrollbar">
+          {pending.map((p, i) => (
+            <div key={i} style={{ position: 'relative', flexShrink: 0 }}>
+              <img src={p.url} alt="" style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 8, display: 'block' }} />
+              <button onClick={() => removePending(i)} aria-label="הסר"
+                style={{ position: 'absolute', top: -6, right: -6, width: 20, height: 20, borderRadius: '50%', background: '#000', color: '#fff', border: '2px solid #F0F2F5', cursor: 'pointer', fontSize: 11, lineHeight: '15px', padding: 0 }}>✕</button>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Input bar */}
       <div style={{
         background: '#F0F2F5', padding: '8px 12px',
         display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0,
       }}>
-        {/* קלט קובץ נסתר — כפתור + פותח אותו (גלריה/קבצים) */}
-        <input ref={fileInputRef} type="file" accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.txt" onChange={handleFile} style={{ display: 'none' }} />
+        {/* קלט תמונות נסתר (רב-בחירה) — כפתור + פותח אותו */}
+        <input ref={fileInputRef} type="file" accept="image/*" multiple onChange={pickImages} style={{ display: 'none' }} />
         <button
           onClick={() => fileInputRef.current?.click()}
           disabled={uploading}
-          aria-label="צרף קובץ"
+          aria-label="צרף תמונות"
           style={{
             width: 40, height: 40, borderRadius: '50%', flexShrink: 0,
             background: '#fff', border: '1px solid #E0E0E0', cursor: uploading ? 'default' : 'pointer',
@@ -409,17 +430,20 @@ export default function ChatConversation() {
 
         <button
           onClick={() => {
+            if (uploading) return
+            if (pending.length) { sendPending(); return }
             if (text.trim()) { handleSend(); return }
             setToast('בקרוב')
             setTimeout(() => setToast(null), 1800)
           }}
+          disabled={uploading}
           style={{
             width: 44, height: 44, borderRadius: '50%',
-            background: '#CC0000', border: 'none', cursor: 'pointer',
+            background: '#CC0000', border: 'none', cursor: uploading ? 'default' : 'pointer',
             display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
           }}
         >
-          {text.trim() ? (
+          {(text.trim() || pending.length) ? (
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
               <path d="M22 2L11 13" stroke="#fff" strokeWidth="2" strokeLinecap="round"/>
               <path d="M22 2L15 22L11 13L2 9L22 2Z" stroke="#fff" strokeWidth="2" strokeLinejoin="round"/>
