@@ -7,11 +7,6 @@ import Avatar from '../components/Avatar'
 import GroupManagementPanel from '../components/GroupManagementPanel'
 import { reportClient, errDetail } from '../lib/report'
 
-// מריץ הבטחה עם timeout — אם לא הושלמה בזמן, נזרק 'timeout' (הבקשה שברקע ננטשת).
-function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
-  return Promise.race([p, new Promise<T>((_, reject) => setTimeout(() => reject(new Error('timeout')), ms))])
-}
-
 // מכווץ תמונה: מקסימום maxW רוחב (שומר יחס), JPEG באיכות quality. מחזיר Blob.
 // מקטין משמעותית את נפח ההעלאה מהנייד. זורק אם משהו נכשל (המתקשר נופל למקור).
 function downscaleImage(file: File, maxW = 1200, quality = 0.8): Promise<Blob> {
@@ -93,39 +88,66 @@ export default function ChatConversation() {
     return () => { supabase.removeChannel(channel) }
   }, [groupId, user?.id])
 
+  // ניסיון בודד: פרטי הקבוצה + ההודעות, עם timeout משותף. זורק על שגיאה/פג-זמן — כדי
+  // שהריטריי יתפוס (בעבר השגיאה נבלעה ב-destructure → "שיחה לא נמצאה" קבוע ללא ריטריי).
+  // מחזיר null רק כשהקבוצה באמת לא קיימת (0 שורות, PGRST116) — שם אין טעם בריטריי.
+  async function fetchConversationOnce(timeoutMs: number): Promise<{ group: GroupInfo; messages: DBMessage[] } | null> {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('timeout')), timeoutMs) })
+    try {
+      const { data: gData, error: gErr } = await Promise.race([
+        supabase.from('groups').select('id, name, type').eq('id', groupId).single(),
+        timeout,
+      ]) as { data: { id: string; name: string; type: string } | null; error: { message: string; code?: string } | null }
+      if (gErr) {
+        if (gErr.code === 'PGRST116') return null   // הקבוצה לא קיימת → not-found סופי
+        throw new Error(gErr.message || 'groups error') // רשת/רענון-טוקן/5xx → ריטריי
+      }
+      if (!gData) return null
+
+      const { count } = await Promise.race([
+        supabase.from('group_members').select('*', { count: 'exact', head: true }).eq('group_id', groupId).is('left_at', null),
+        timeout,
+      ]) as { count: number | null }
+
+      const { data: msgs, error: mErr } = await Promise.race([
+        supabase.from('messages').select('*').eq('group_id', groupId).eq('is_deleted', false).order('created_at', { ascending: true }).limit(100),
+        timeout,
+      ]) as { data: DBMessage[] | null; error: { message: string } | null }
+      if (mErr) throw new Error(mErr.message || 'messages error')
+
+      return {
+        group: { id: gData.id, name: gData.name, type: gData.type as 'direct' | 'group', memberCount: count ?? 0 },
+        messages: (msgs ?? []) as DBMessage[],
+      }
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
   async function loadGroupAndMessages() {
     if (!groupId) return
     setLoading(true)
 
-    // שלוש השאילתות. שאילתה שנתקעת (cold-start ב-PWA של iOS) הייתה תולה את
-    // ה-await לנצח וה-finally לא רץ → תקוע על "טוען…". עוטפים ב-timeout מדורג
-    // עם retry, כך שהניסיון הראשון נכשל מהר והריטריי (שמצליח) קופץ מיד.
-    const run = async () => {
-      const { data: gData } = await supabase
-        .from('groups').select('id, name, type').eq('id', groupId).single()
-      const { count } = await supabase
-        .from('group_members').select('*', { count: 'exact', head: true })
-        .eq('group_id', groupId).is('left_at', null)
-      if (gData) {
-        setGroupInfo({ id: gData.id, name: gData.name, type: gData.type as 'direct' | 'group', memberCount: count ?? 0 })
-      }
-      const { data: msgs } = await supabase
-        .from('messages').select('*').eq('group_id', groupId).eq('is_deleted', false)
-        .order('created_at', { ascending: true }).limit(100)
-      setMessages((msgs ?? []) as DBMessage[])
-    }
-
+    // timeout מדורג + retry כמו ב-ChatList: ניסיון ראשון קצר תופס stall של cold-start
+    // ב-PWA של iOS, והריטריי (שמצליח) קופץ מהר. שגיאה חולפת בשאילתת ה-groups כבר לא
+    // נבלעת → מנסים שוב, ורק כשהקבוצה באמת לא קיימת (או אחרי מיצוי הריטריי) מציגים "לא נמצאה".
     const TIMEOUTS = [4000, 8000, 12000, 12000]
     try {
+      let result: { group: GroupInfo; messages: DBMessage[] } | null = null
       let lastErr: unknown = null
       for (let i = 0; i < TIMEOUTS.length; i++) {
-        try { await withTimeout(run(), TIMEOUTS[i]); lastErr = null; break }
+        try { result = await fetchConversationOnce(TIMEOUTS[i]); lastErr = null; break }
         catch (e) { lastErr = e; if (i < TIMEOUTS.length - 1) await new Promise(r => setTimeout(r, 250)) }
       }
       if (lastErr) {
         console.error('[chat] load failed after retries:', lastErr)
         reportClient({ where: 'chat-load-failed', online: navigator.onLine, ...errDetail(lastErr) })
+      } else if (result) {
+        setGroupInfo(result.group)
+        setMessages(result.messages)
       }
+      // result === null → הקבוצה לא קיימת; groupInfo נשאר null → "שיחה לא נמצאה"
     } finally {
       setLoading(false)   // תמיד — לא נתקעים על "טוען…"
     }
