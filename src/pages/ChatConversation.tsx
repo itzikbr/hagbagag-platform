@@ -12,6 +12,31 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   return Promise.race([p, new Promise<T>((_, reject) => setTimeout(() => reject(new Error('timeout')), ms))])
 }
 
+// מכווץ תמונה: מקסימום maxW רוחב (שומר יחס), JPEG באיכות quality. מחזיר Blob.
+// מקטין משמעותית את נפח ההעלאה מהנייד. זורק אם משהו נכשל (המתקשר נופל למקור).
+function downscaleImage(file: File, maxW = 1200, quality = 0.8): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = () => reject(new Error('read-fail'))
+    reader.onload = () => {
+      const img = new Image()
+      img.onerror = () => reject(new Error('img-fail'))
+      img.onload = () => {
+        let width = img.width, height = img.height
+        if (width > maxW) { height = Math.round(height * maxW / width); width = maxW }
+        const canvas = document.createElement('canvas')
+        canvas.width = width; canvas.height = height
+        const ctx = canvas.getContext('2d')
+        if (!ctx) { reject(new Error('no-ctx')); return }
+        ctx.drawImage(img, 0, 0, width, height)
+        canvas.toBlob(b => b ? resolve(b) : reject(new Error('blob-fail')), 'image/jpeg', quality)
+      }
+      img.src = reader.result as string
+    }
+    reader.readAsDataURL(file)
+  })
+}
+
 interface GroupInfo {
   id: string
   name: string
@@ -129,13 +154,20 @@ export default function ChatConversation() {
     if (!file || !groupId || !user || !profile || uploading) return
     setUploading(true)
     try {
-      const ext = (file.name.split('.').pop() || 'bin').toLowerCase().replace(/[^a-z0-9]/g, '')
+      const isImage = (file.type || '').startsWith('image/')
+      // תמונות: כיווץ ל-1200px רוחב + JPEG 80% לפני העלאה (מקטין משמעותית זמן העלאה)
+      let upload: Blob = file
+      let ext = (file.name.split('.').pop() || 'bin').toLowerCase().replace(/[^a-z0-9]/g, '')
+      let contentType = file.type || undefined
+      if (isImage) {
+        const compressed = await downscaleImage(file, 1200, 0.8).catch(() => null)
+        if (compressed) { upload = compressed; ext = 'jpg'; contentType = 'image/jpeg' }
+      }
       const rand = (crypto.randomUUID?.() ?? Math.random().toString(36).slice(2))
       const path = `${groupId}/${rand}.${ext}`
-      const { error: upErr } = await supabase.storage.from('chat-files').upload(path, file, { contentType: file.type || undefined })
+      const { error: upErr } = await supabase.storage.from('chat-files').upload(path, upload, { contentType })
       if (upErr) throw upErr
       const { data: pub } = supabase.storage.from('chat-files').getPublicUrl(path)
-      const isImage = (file.type || '').startsWith('image/')
       const { error: msgErr } = await supabase.from('messages').insert({
         group_id: groupId,
         sender_id: user.id,
@@ -144,7 +176,7 @@ export default function ChatConversation() {
         message_type: isImage ? 'image' : 'file',
         file_url: pub.publicUrl,
         file_name: file.name,
-        file_size: file.size,
+        file_size: upload.size,
       })
       if (msgErr) throw msgErr
       // Realtime subscription יוסיף את ההודעה
