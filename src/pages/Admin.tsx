@@ -227,9 +227,10 @@ export default function Admin() {
         {showAddForm && (
           <div style={{ background: '#fff', margin: 12, borderRadius: 12, padding: 16, boxShadow: '0 1px 4px rgba(0,0,0,0.1)' }}>
             <div style={{ fontWeight: 600, marginBottom: 12, fontSize: 15, color: '#111' }}>משתמש חדש</div>
+            <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#54656F', marginBottom: 4, direction: 'rtl' }}>שם מלא *</label>
             <input
               type="text"
-              placeholder="שם מלא *"
+              placeholder="שם מלא (לדוגמה: עמאד סאלח)"
               value={newUser.full_name}
               onChange={e => setNewUser(p => ({ ...p, full_name: e.target.value }))}
               style={{ width: '100%', border: '1px solid #E0E0E0', borderRadius: 8, padding: '8px 12px', fontSize: 14, marginBottom: 8, boxSizing: 'border-box', direction: 'rtl' }}
