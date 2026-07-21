@@ -18,7 +18,7 @@ export default function AdminDashboard() {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: BG, direction: 'rtl' }}>
       {/* Header */}
       <div style={{ background: RED, padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
-        <button onClick={() => navigate('/itzik')} aria-label="חזרה" style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#fff', fontSize: 22, padding: 0, width: 30 }}>‹</button>
+        <button onClick={() => navigate('/chats')} aria-label="חזרה" style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#fff', fontSize: 22, padding: 0, width: 30 }}>‹</button>
         <span style={{ color: '#fff', fontWeight: 800, fontSize: 18 }}>⚙️ ניהול מערכת</span>
       </div>
 
