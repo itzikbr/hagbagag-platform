@@ -48,7 +48,7 @@ export default function BottomNav({ activeTab, onTabChange }: BottomNavProps) {
       ),
       path: '/sheets',
     },
-    {
+    ...(isAdmin ? [{
       id: 'more' as const,
       label: 'התראות',
       icon: (active: boolean) => (
@@ -57,7 +57,7 @@ export default function BottomNav({ activeTab, onTabChange }: BottomNavProps) {
         </svg>
       ),
       path: '/chats',
-    },
+    }] : []),
     ...(showItzik ? [{
       id: 'itzik' as const,
       label: '',

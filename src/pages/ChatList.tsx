@@ -160,25 +160,29 @@ export default function ChatList() {
           )}
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button
-            onClick={() => navigate('/new-chat')}
-            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}
-          >
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-              <path d="M20 2H4C2.9 2 2 2.9 2 4V22L6 18H20C21.1 18 22 17.1 22 16V4C22 2.9 21.1 2 20 2Z" fill="rgba(255,255,255,0.8)"/>
-              <line x1="8" y1="10" x2="16" y2="10" stroke="#CC0000" strokeWidth="1.5"/>
-              <line x1="12" y1="6" x2="12" y2="14" stroke="#CC0000" strokeWidth="1.5"/>
-            </svg>
-          </button>
-          <button
-            onClick={() => navigate('/contacts')}
-            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}
-          >
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-              <circle cx="12" cy="8" r="4" stroke="rgba(255,255,255,0.8)" strokeWidth="2"/>
-              <path d="M4 20C4 17 7.6 15 12 15C16.4 15 20 17 20 20" stroke="rgba(255,255,255,0.8)" strokeWidth="2" strokeLinecap="round"/>
-            </svg>
-          </button>
+          {isAdmin && (
+            <button
+              onClick={() => navigate('/new-chat')}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}
+            >
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                <path d="M20 2H4C2.9 2 2 2.9 2 4V22L6 18H20C21.1 18 22 17.1 22 16V4C22 2.9 21.1 2 20 2Z" fill="rgba(255,255,255,0.8)"/>
+                <line x1="8" y1="10" x2="16" y2="10" stroke="#CC0000" strokeWidth="1.5"/>
+                <line x1="12" y1="6" x2="12" y2="14" stroke="#CC0000" strokeWidth="1.5"/>
+              </svg>
+            </button>
+          )}
+          {isAdmin && (
+            <button
+              onClick={() => navigate('/contacts')}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}
+            >
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                <circle cx="12" cy="8" r="4" stroke="rgba(255,255,255,0.8)" strokeWidth="2"/>
+                <path d="M4 20C4 17 7.6 15 12 15C16.4 15 20 17 20 20" stroke="rgba(255,255,255,0.8)" strokeWidth="2" strokeLinecap="round"/>
+              </svg>
+            </button>
+          )}
           {isAdmin && (
             <button
               onClick={() => navigate('/admin')}
@@ -242,23 +246,25 @@ export default function ChatList() {
         ))}
       </div>
 
-      {/* FAB */}
-      <button
-        onClick={() => navigate('/new-chat')}
-        style={{
-          position: 'fixed', bottom: 72, left: 16,
-          width: 56, height: 56, borderRadius: '50%',
-          background: '#CC0000', border: 'none', cursor: 'pointer',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.3)', zIndex: 10,
-        }}
-      >
-        <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
-          <path d="M20 2H4C2.9 2 2 2.9 2 4V22L6 18H20C21.1 18 22 17.1 22 16V4C22 2.9 21.1 2 20 2Z" fill="#fff"/>
-          <line x1="8" y1="10" x2="16" y2="10" stroke="#CC0000" strokeWidth="2"/>
-          <line x1="12" y1="6" x2="12" y2="14" stroke="#CC0000" strokeWidth="2"/>
-        </svg>
-      </button>
+      {/* FAB — יצירת שיחה חדשה (אדמין בלבד; משתמשים רגילים משתתפים בשיחות קיימות) */}
+      {isAdmin && (
+        <button
+          onClick={() => navigate('/new-chat')}
+          style={{
+            position: 'fixed', bottom: 72, left: 16,
+            width: 56, height: 56, borderRadius: '50%',
+            background: '#CC0000', border: 'none', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.3)', zIndex: 10,
+          }}
+        >
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
+            <path d="M20 2H4C2.9 2 2 2.9 2 4V22L6 18H20C21.1 18 22 17.1 22 16V4C22 2.9 21.1 2 20 2Z" fill="#fff"/>
+            <line x1="8" y1="10" x2="16" y2="10" stroke="#CC0000" strokeWidth="2"/>
+            <line x1="12" y1="6" x2="12" y2="14" stroke="#CC0000" strokeWidth="2"/>
+          </svg>
+        </button>
+      )}
     </div>
   )
 }

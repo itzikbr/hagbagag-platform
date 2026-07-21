@@ -53,8 +53,9 @@ function PlatformLayout() {
   const [activeTab, setActiveTab] = useState<'chats' | 'sheets' | 'more' | 'itzik' | 'gemini'>('chats')
   const location = useLocation()
   const isAdmin = useIsAdmin()
-  const hideNav = !isAdmin ||   // משתמש שאינו אדמין רואה רק דפי ביצוע — בלי ניווט תחתון
-                  location.pathname.startsWith('/chat/') ||
+  // הניווט התחתון מוצג לכל המשתמשים (שיחות + דפי ביצוע). מוסתר רק במסכי-משנה
+  // מלאים (שיחה בודדת, עורך דף, מסכי אדמין) שיש להם כותרת/חזרה משלהם.
+  const hideNav = location.pathname.startsWith('/chat/') ||
                   location.pathname === '/new-chat' ||
                   location.pathname === '/new-group' ||
                   location.pathname === '/contacts' ||
@@ -71,9 +72,10 @@ function PlatformLayout() {
           <Route path="/sheets/new" element={<NewExecutionSheet />} />
           <Route path="/sheets/:id/view" element={<ExecutionSheetView />} />
           <Route path="/sheets/:id" element={<NewExecutionSheet />} />
-          {/* כל שאר המסכים — אדמין בלבד */}
-          <Route path="/chats"     element={<RequireAdmin><ChatList /></RequireAdmin>} />
-          <Route path="/chat/:id"  element={<RequireAdmin><ChatConversation /></RequireAdmin>} />
+          {/* שיחות — פתוח לכל משתמש מחובר (RLS מבוסס-חברות קובע מה נראה) */}
+          <Route path="/chats"     element={<ChatList />} />
+          <Route path="/chat/:id"  element={<ChatConversation />} />
+          {/* יצירת שיחות/קבוצות/אנשי קשר + ניהול — אדמין בלבד */}
           <Route path="/new-chat"  element={<RequireAdmin><NewChat /></RequireAdmin>} />
           <Route path="/new-group" element={<RequireAdmin><NewGroup /></RequireAdmin>} />
           <Route path="/contacts"  element={<RequireAdmin><Contacts /></RequireAdmin>} />
