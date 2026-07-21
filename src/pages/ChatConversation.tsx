@@ -27,6 +27,8 @@ export default function ChatConversation() {
   const [groupInfo, setGroupInfo] = useState<GroupInfo | null>(null)
   const [messages, setMessages] = useState<DBMessage[]>([])
   const [text, setText] = useState('')
+  const [uploading, setUploading] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [loading, setLoading] = useState(true)
   const bottomRef = useRef<HTMLDivElement>(null)
   const [showPanel, setShowPanel] = useState(false)
@@ -118,6 +120,41 @@ export default function ChatConversation() {
       setText(content) // Restore on error
     }
     // Realtime subscription will add the new message automatically
+  }
+
+  // העלאת תמונה/קובץ ל-Supabase Storage (bucket ציבורי chat-files) + הודעה
+  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''  // מאפשר לבחור שוב אותו קובץ
+    if (!file || !groupId || !user || !profile || uploading) return
+    setUploading(true)
+    try {
+      const ext = (file.name.split('.').pop() || 'bin').toLowerCase().replace(/[^a-z0-9]/g, '')
+      const rand = (crypto.randomUUID?.() ?? Math.random().toString(36).slice(2))
+      const path = `${groupId}/${rand}.${ext}`
+      const { error: upErr } = await supabase.storage.from('chat-files').upload(path, file, { contentType: file.type || undefined })
+      if (upErr) throw upErr
+      const { data: pub } = supabase.storage.from('chat-files').getPublicUrl(path)
+      const isImage = (file.type || '').startsWith('image/')
+      const { error: msgErr } = await supabase.from('messages').insert({
+        group_id: groupId,
+        sender_id: user.id,
+        sender_name: profile.full_name,
+        content: isImage ? '' : file.name,
+        message_type: isImage ? 'image' : 'file',
+        file_url: pub.publicUrl,
+        file_name: file.name,
+        file_size: file.size,
+      })
+      if (msgErr) throw msgErr
+      // Realtime subscription יוסיף את ההודעה
+    } catch (err) {
+      console.error('שגיאה בהעלאת קובץ:', err)
+      setToast('העלאת הקובץ נכשלה')
+      setTimeout(() => setToast(null), 2200)
+    } finally {
+      setUploading(false)
+    }
   }
 
   // Group messages by date
@@ -260,9 +297,24 @@ export default function ChatConversation() {
                       </div>
                     )}
 
-                    <span style={{ fontSize: 14, color: '#111', lineHeight: 1.4, wordBreak: 'break-word' }}>
-                      {msg.content}
-                    </span>
+                    {msg.message_type === 'image' && msg.file_url ? (
+                      <img src={msg.file_url} alt={msg.file_name ?? 'תמונה'}
+                        onClick={() => window.open(msg.file_url!, '_blank')}
+                        style={{ maxWidth: 220, maxHeight: 280, borderRadius: 8, display: 'block', cursor: 'pointer' }} />
+                    ) : msg.message_type === 'file' && msg.file_url ? (
+                      <a href={msg.file_url} target="_blank" rel="noopener noreferrer"
+                        style={{ display: 'flex', alignItems: 'center', gap: 8, textDecoration: 'none', color: '#111', padding: '2px 0' }}>
+                        <span style={{ fontSize: 24 }}>📎</span>
+                        <span style={{ fontSize: 14, wordBreak: 'break-word' }}>
+                          {msg.file_name || 'קובץ'}
+                          {msg.file_size ? <span style={{ color: '#8696A0', fontSize: 12 }}> · {Math.max(1, Math.round(msg.file_size / 1024))}KB</span> : null}
+                        </span>
+                      </a>
+                    ) : (
+                      <span style={{ fontSize: 14, color: '#111', lineHeight: 1.4, wordBreak: 'break-word' }}>
+                        {msg.content}
+                      </span>
+                    )}
 
                     <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 3, marginTop: 2 }}>
                       <span style={{ fontSize: 11, color: '#8696A0' }}>
@@ -284,13 +336,26 @@ export default function ChatConversation() {
         background: '#F0F2F5', padding: '8px 12px',
         display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0,
       }}>
-        <button style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-            <circle cx="12" cy="12" r="10" stroke="#8696A0" strokeWidth="1.5"/>
-            <path d="M8 13C8 13 9.5 15 12 15C14.5 15 16 13 16 13" stroke="#8696A0" strokeWidth="1.5" strokeLinecap="round"/>
-            <circle cx="9" cy="10" r="1" fill="#8696A0"/>
-            <circle cx="15" cy="10" r="1" fill="#8696A0"/>
-          </svg>
+        {/* קלט קובץ נסתר — כפתור + פותח אותו (גלריה/קבצים) */}
+        <input ref={fileInputRef} type="file" accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.txt" onChange={handleFile} style={{ display: 'none' }} />
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          disabled={uploading}
+          aria-label="צרף קובץ"
+          style={{
+            width: 40, height: 40, borderRadius: '50%', flexShrink: 0,
+            background: '#fff', border: '1px solid #E0E0E0', cursor: uploading ? 'default' : 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0,
+          }}
+        >
+          {uploading ? (
+            <span style={{ width: 18, height: 18, border: '2px solid #ccc', borderTopColor: '#CC0000', borderRadius: '50%', display: 'inline-block', animation: 'spin 0.7s linear infinite' }} />
+          ) : (
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+              <path d="M12 5v14M5 12h14" stroke="#54656F" strokeWidth="2.2" strokeLinecap="round"/>
+            </svg>
+          )}
+          <style>{'@keyframes spin { to { transform: rotate(360deg); } }'}</style>
         </button>
 
         <div style={{
