@@ -1,7 +1,20 @@
+import { useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { useIsAdmin } from '../hooks/useAuth'
+import { useIsAdmin, useAuth } from '../hooks/useAuth'
+import { reportClient } from '../lib/report'
 
 type Tab = 'chats' | 'sheets' | 'more' | 'itzik' | 'gemini'
+
+// hash הבנדל שנטען בפועל במכשיר — נשלף מ-<script src="/assets/index-<hash>.js">.
+// מזהה חד-משמעית איזו גרסה רצה על המכשיר (ישן/חדש) לצורך אבחון.
+function bundleHash(): string {
+  try {
+    const src = Array.from(document.getElementsByTagName('script'))
+      .map(el => el.getAttribute('src') || '')
+      .find(s => /\/assets\/index-.*\.js/.test(s))
+    return src ? (src.match(/index-([A-Za-z0-9]+)\.js/)?.[1] ?? 'unknown') : 'unknown'
+  } catch { return 'unknown' }
+}
 
 interface BottomNavProps {
   activeTab: Tab
@@ -12,6 +25,8 @@ export default function BottomNav({ activeTab, onTabChange }: BottomNavProps) {
   const navigate = useNavigate()
   const location = useLocation()
   const isAdmin = useIsAdmin()
+  const role = useAuth(s => s.profile?.role)
+  const email = useAuth(s => s.user?.email)
 
   const isChats = location.pathname.startsWith('/chat') || location.pathname === '/chats'
   const isSheets = location.pathname === '/sheets'
@@ -82,6 +97,24 @@ export default function BottomNav({ activeTab, onTabChange }: BottomNavProps) {
       path: '/gemini',
     }] : []),
   ]
+
+  // אבחון: מדווח פעם אחת בעליית הניווט מה בדיוק רונדר במכשיר הזה — רשימת הטאבים,
+  // isAdmin, role, אימייל, hash הבנדל, האם PWA standalone, והאם SW שולט. מאפשר
+  // לראות ב-journalctl -u gemini-server איזו גרסה משתמש כמו סים באמת מריץ.
+  const tabIds = tabs.map(t => t.id)
+  useEffect(() => {
+    reportClient({
+      where: 'nav-diag',
+      tabs: tabIds,
+      isAdmin,
+      role: role ?? null,
+      email: email ?? null,
+      bundle: bundleHash(),
+      standalone: window.matchMedia?.('(display-mode: standalone)')?.matches ?? false,
+      swControlled: !!navigator.serviceWorker?.controller,
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   return (
     <div style={{
