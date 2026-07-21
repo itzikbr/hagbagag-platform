@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth, useIsAdmin } from '../hooks/useAuth'
@@ -25,8 +25,13 @@ export default function ChatList() {
   const profile = useAuth(s => s.profile)
   const isAdmin = useIsAdmin()
 
+  const aliveRef = useRef(true)
+  const loadedOnce = useRef(false)
+  const initialDoneRef = useRef(false)
+
   useEffect(() => {
     if (!userId) return
+    aliveRef.current = true
     loadGroups()
 
     // Realtime — refresh when a new message arrives in any group
@@ -37,48 +42,55 @@ export default function ChatList() {
         schema: 'public',
         table: 'messages',
       }, () => {
-        loadGroups()
+        loadGroups({ background: true })
       })
       .subscribe()
 
-    return () => { supabase.removeChannel(channel) }
+    // רענון בכל חזרה למסך (PWA/טאב/bfcache) — רק אחרי הטעינה הראשונית.
+    // בלי זה, טעינה שנתקעה ברקע (iOS) נשארת תקועה על "טוען שיחות..." לנצח.
+    const refreshOnReturn = () => {
+      if (initialDoneRef.current && document.visibilityState === 'visible') loadGroups({ background: true })
+    }
+    document.addEventListener('visibilitychange', refreshOnReturn)
+    window.addEventListener('focus', refreshOnReturn)
+    window.addEventListener('pageshow', refreshOnReturn)
+
+    return () => {
+      aliveRef.current = false
+      supabase.removeChannel(channel)
+      document.removeEventListener('visibilitychange', refreshOnReturn)
+      window.removeEventListener('focus', refreshOnReturn)
+      window.removeEventListener('pageshow', refreshOnReturn)
+    }
   }, [userId])
 
-  async function loadGroups() {
-    if (!userId) return
+  // ניסיון בודד לטעינת השיחות, עם timeout. זורק על שגיאה/פג-זמן — כדי שהריטריי יתפוס.
+  async function fetchGroupsOnce(timeoutMs: number): Promise<GroupRow[]> {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('timeout')), timeoutMs) })
     try {
       // 1. Get group IDs the user belongs to
-      const { data: memberOf, error: memberErr } = await supabase
-        .from('group_members')
-        .select('group_id')
-        .eq('user_id', userId)
-        .is('left_at', null)
-
-      if (memberErr) { console.error(memberErr); return }
-      if (!memberOf || memberOf.length === 0) {
-        setGroups([])
-        setLoading(false)
-        return
-      }
+      const { data: memberOf, error: memberErr } = await Promise.race([
+        supabase.from('group_members').select('group_id').eq('user_id', userId).is('left_at', null),
+        timeout,
+      ]) as { data: { group_id: string }[] | null; error: { message: string } | null }
+      if (memberErr) throw new Error(memberErr.message || 'group_members error')
+      if (!memberOf || memberOf.length === 0) return []
 
       const groupIds = memberOf.map(m => m.group_id)
 
       // 2. Get groups data
-      const { data: groupsData, error: groupsErr } = await supabase
-        .from('groups')
-        .select('id, name, type, avatar_url, updated_at')
-        .in('id', groupIds)
-        .order('updated_at', { ascending: false })
-
-      if (groupsErr) { console.error(groupsErr); return }
+      const { data: groupsData, error: groupsErr } = await Promise.race([
+        supabase.from('groups').select('id, name, type, avatar_url, updated_at').in('id', groupIds).order('updated_at', { ascending: false }),
+        timeout,
+      ]) as { data: Omit<GroupRow, 'lastMessage' | 'lastMessageTime' | 'unreadCount'>[] | null; error: { message: string } | null }
+      if (groupsErr) throw new Error(groupsErr.message || 'groups error')
 
       // 3. Get last message for each group
-      const { data: allMessages } = await supabase
-        .from('messages')
-        .select('group_id, content, sender_name, created_at, message_type')
-        .in('group_id', groupIds)
-        .eq('is_deleted', false)
-        .order('created_at', { ascending: false })
+      const { data: allMessages } = await Promise.race([
+        supabase.from('messages').select('group_id, content, sender_name, created_at, message_type').in('group_id', groupIds).eq('is_deleted', false).order('created_at', { ascending: false }),
+        timeout,
+      ]) as { data: { group_id: string; content: string | null; created_at: string; message_type: string }[] | null; error: { message: string } | null }
 
       // Build a map: group_id → last message
       const lastMsgMap: Record<string, { content: string; created_at: string }> = {}
@@ -93,7 +105,7 @@ export default function ChatList() {
         }
       }
 
-      const rows: GroupRow[] = (groupsData ?? []).map(g => {
+      return (groupsData ?? []).map(g => {
         const lm = lastMsgMap[g.id]
         return {
           id: g.id,
@@ -106,10 +118,39 @@ export default function ChatList() {
           unreadCount: 0, // TODO: compute unread from message_reads
         }
       })
-
-      setGroups(rows)
     } finally {
-      setLoading(false)
+      clearTimeout(timer)
+    }
+  }
+
+  async function loadGroups({ background = false }: { background?: boolean } = {}) {
+    if (!userId) return
+    if (!background) setLoading(true)
+    try {
+      // timeout מדורג כמו ב-ExecutionSheetsList: ניסיון 1 קצר תופס stall של cold-start
+      // ב-PWA של iOS והריטריי קופץ מהר; מאוחר יותר ארוך יותר לרשת איטית אמיתית.
+      const TIMEOUTS = [4000, 8000, 12000, 12000]
+      let rows: GroupRow[] | null = null
+      let lastErr: unknown = null
+      for (let attempt = 0; attempt < TIMEOUTS.length; attempt++) {
+        try { rows = await fetchGroupsOnce(TIMEOUTS[attempt]); lastErr = null; break }
+        catch (e) {
+          lastErr = e
+          console.warn(`[chatlist] attempt ${attempt + 1} failed:`, e)
+          if (attempt < TIMEOUTS.length - 1) await new Promise(r => setTimeout(r, 250))
+        }
+      }
+      if (!aliveRef.current) return
+
+      if (lastErr) {
+        console.error('[chatlist] loadGroups failed after retries:', lastErr)
+      } else if (rows) {
+        setGroups(rows)
+        loadedOnce.current = true
+      }
+    } finally {
+      // תמיד מכבים את הספינר בסיום ניסיון foreground — כדי שלא נתקע לנצח על "טוען שיחות...".
+      if (aliveRef.current && !background) { setLoading(false); initialDoneRef.current = true }
     }
   }
 
