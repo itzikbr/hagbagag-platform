@@ -30,6 +30,8 @@ export default function Admin() {
   const [users, setUsers] = useState<DBUser[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<DBUser | null>(null)
+  const [deleting, setDeleting] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [saving, setSaving] = useState<string | null>(null)
   const [showAddForm, setShowAddForm] = useState(false)
@@ -58,6 +60,29 @@ export default function Admin() {
       setLoadError(true)
     } finally {
       setLoading(false)   // תמיד — כדי שלא ייתקע על "טוען…"
+    }
+  }
+
+  async function deleteUser(u: DBUser) {
+    setDeleting(true)
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const res = await fetch('https://edsivltyzrfjrjhwfbid.supabase.co/functions/v1/create-user', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token}` },
+        body: JSON.stringify({ user_id: u.id }),
+      })
+      const result = await res.json()
+      if (result.success) {
+        setUsers(prev => prev.filter(x => x.id !== u.id))
+        setDeleteTarget(null)
+      } else {
+        alert('מחיקה נכשלה: ' + (result.error || 'לא ידוע'))
+      }
+    } catch (e) {
+      alert('שגיאת תקשורת: ' + String(e))
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -320,6 +345,7 @@ export default function Admin() {
                 onStartChangePassword={() => setChangingPassword({ id: u.id, value: '' })}
                 onPasswordChange={(v) => setChangingPassword({ id: u.id, value: v })}
                 onSavePassword={() => changePassword(u.id, changingPassword?.value ?? '')}
+                onDelete={() => setDeleteTarget(u)}
               />
             ))}
           </div>
@@ -327,11 +353,36 @@ export default function Admin() {
 
         <div style={{ height: 24 }} />
       </div>
+
+      {/* דיאלוג אישור מחיקה */}
+      {deleteTarget && (
+        <div onClick={() => !deleting && setDeleteTarget(null)}
+          style={{ position: 'fixed', inset: 0, zIndex: 2000, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ background: '#fff', borderRadius: 16, padding: 20, maxWidth: 340, width: '100%', textAlign: 'center', direction: 'rtl' }}>
+            <div style={{ fontSize: 40, marginBottom: 8 }}>🗑️</div>
+            <div style={{ fontSize: 17, fontWeight: 700, color: '#111', marginBottom: 6 }}>למחוק את {deleteTarget.full_name}?</div>
+            <div style={{ fontSize: 14, color: '#666', marginBottom: 18, lineHeight: 1.5 }}>
+              המשתמש והגישה שלו יימחקו לצמיתות. פעולה בלתי הפיכה.
+            </div>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button onClick={() => deleteUser(deleteTarget)} disabled={deleting}
+                style={{ flex: 1, background: '#CC0000', color: '#fff', border: 'none', borderRadius: 10, padding: 12, fontSize: 15, fontWeight: 700, cursor: 'pointer' }}>
+                {deleting ? 'מוחק…' : 'מחק'}
+              </button>
+              <button onClick={() => setDeleteTarget(null)} disabled={deleting}
+                style={{ flex: 1, background: '#eee', color: '#444', border: 'none', borderRadius: 10, padding: 12, fontSize: 15, fontWeight: 600, cursor: 'pointer' }}>
+                ביטול
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
 
-function UserCard({ user, editing, saving, editingName, editingUsername, changingPassword, onEdit, onRoleChange, onToggleActive, onStartEditName, onNameChange, onSaveName, onStartEditUsername, onUsernameChange, onSaveUsername, onStartChangePassword, onPasswordChange, onSavePassword }: {
+function UserCard({ user, editing, saving, editingName, editingUsername, changingPassword, onEdit, onRoleChange, onToggleActive, onStartEditName, onNameChange, onSaveName, onStartEditUsername, onUsernameChange, onSaveUsername, onStartChangePassword, onPasswordChange, onSavePassword, onDelete }: {
   user: DBUser
   editing: boolean
   saving: boolean
@@ -350,6 +401,7 @@ function UserCard({ user, editing, saving, editingName, editingUsername, changin
   onStartChangePassword: () => void
   onPasswordChange: (v: string) => void
   onSavePassword: () => void
+  onDelete: () => void
 }) {
   return (
     <div style={{ background: user.is_active ? '#fff' : '#F9F9F9', borderBottom: '1px solid #F0F2F5', padding: '12px 16px' }}>
@@ -396,6 +448,10 @@ function UserCard({ user, editing, saving, editingName, editingUsername, changin
             <button onClick={onStartChangePassword} disabled={saving}
               style={{ background: changingPassword !== null ? '#FFF0F0' : '#F0F2F5', border: 'none', borderRadius: 8, padding: '5px 10px', cursor: 'pointer', fontSize: 12, color: changingPassword !== null ? '#CC0000' : '#555' }}>
               סיסמה
+            </button>
+            <button onClick={onDelete} disabled={saving}
+              style={{ background: '#CC0000', border: 'none', borderRadius: 8, padding: '5px 10px', cursor: 'pointer', fontSize: 12, color: '#fff', fontWeight: 600 }}>
+              מחק
             </button>
           </div>
         </div>
