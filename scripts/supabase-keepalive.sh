@@ -34,5 +34,26 @@ code="$(curl -s -o /dev/null -w '%{http_code}' -m 20 \
 
 echo "$ts keepalive HTTP $code" >> "$LOG"
 
+# ── ניטור: התראת טלגרם על מעבר מצב בלבד (OK↔FAIL) כדי לא לספם כל 4 דק' ──
+STATE="/root/supabase-keepalive.state"
+SECRETS="/root/chagagi/secrets.env"
+status="OK"; [ "$code" = "200" ] || status="FAIL"
+prev="$(cat "$STATE" 2>/dev/null || echo NONE)"
+echo "$status" > "$STATE"
+if [ "$status" != "$prev" ] && [ "$prev" != "NONE" ]; then
+  TG_TOKEN="$(clean "$(grep -m1 '^TELEGRAM_BOT_TOKEN='      "$SECRETS" 2>/dev/null | cut -d= -f2-)")"
+  TG_CHAT="$(clean  "$(grep -m1 '^TELEGRAM_ALERT_CHAT_ID=' "$SECRETS" 2>/dev/null | cut -d= -f2-)")"
+  if [ -n "$TG_TOKEN" ] && [ -n "$TG_CHAT" ]; then
+    if [ "$status" = "FAIL" ]; then
+      msg="⚠️ Supabase keepalive נכשל — HTTP $code ($ts). ייתכן שהפרויקט הושהה או תקלת רשת."
+    else
+      msg="✅ Supabase keepalive חזר לתקין (HTTP 200) — $ts"
+    fi
+    curl -s -o /dev/null -m 15 "https://api.telegram.org/bot$TG_TOKEN/sendMessage" \
+      --data-urlencode "chat_id=$TG_CHAT" --data-urlencode "text=$msg"
+    echo "$ts ALERT sent ($prev→$status)" >> "$LOG"
+  fi
+fi
+
 # שמירה על לוג קטן (500 שורות אחרונות)
 tail -n 500 "$LOG" > "$LOG.tmp" 2>/dev/null && mv "$LOG.tmp" "$LOG"
