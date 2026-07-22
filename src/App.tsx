@@ -22,7 +22,7 @@ import ErrorBoundary from './components/ErrorBoundary'
 
 function Splash() {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#CC0000', gap: 16 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100dvh', background: '#CC0000', gap: 16 }}>
       <span style={{ fontSize: 60 }}>🏠</span>
       <h1 style={{ color: '#fff', fontSize: 26, fontWeight: 700, margin: 0 }}>חג בגג</h1>
       <div style={{ width: 32, height: 32, border: '3px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.7s linear infinite', marginTop: 8 }} />
@@ -62,7 +62,7 @@ function PlatformLayout() {
                   location.pathname.startsWith('/sheets/') ||
                   location.pathname.startsWith('/admin')
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100dvh', overflow: 'hidden' }}>
       <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
         <ErrorBoundary name="platform">
         <Routes>
