@@ -92,6 +92,29 @@ export default function ChatList() {
         timeout,
       ]) as { data: { group_id: string; content: string | null; created_at: string; message_type: string }[] | null; error: { message: string } | null }
 
+      // 4. שם בן-השיח לשיחות direct. groups.name נשמר סטטית לפי מבט-היוצר (שם הצד
+      //    השני מבחינת מי שיצר), ולכן שגוי לצד השני — הוא רואה את שמו-שלו. גוזרים את
+      //    שם התצוגה מהחבר האחר בפועל (user_id ≠ המשתמש המחובר).
+      const { data: otherMembers } = await Promise.race([
+        supabase.from('group_members').select('group_id, user_id').in('group_id', groupIds).is('left_at', null).neq('user_id', userId),
+        timeout,
+      ]) as { data: { group_id: string; user_id: string }[] | null }
+
+      const otherIds = [...new Set((otherMembers ?? []).map(m => m.user_id))]
+      const nameById: Record<string, string> = {}
+      if (otherIds.length) {
+        const { data: otherUsers } = await Promise.race([
+          supabase.from('users').select('id, full_name').in('id', otherIds),
+          timeout,
+        ]) as { data: { id: string; full_name: string }[] | null }
+        for (const u of otherUsers ?? []) nameById[u.id] = u.full_name
+      }
+      // group_id → שם החבר האחר (בשיחת direct יש בדיוק אחד כזה)
+      const otherNameMap: Record<string, string> = {}
+      for (const m of otherMembers ?? []) {
+        if (!otherNameMap[m.group_id] && nameById[m.user_id]) otherNameMap[m.group_id] = nameById[m.user_id]
+      }
+
       // Build a map: group_id → last message
       const lastMsgMap: Record<string, { content: string; created_at: string }> = {}
       if (allMessages) {
@@ -109,7 +132,8 @@ export default function ChatList() {
         const lm = lastMsgMap[g.id]
         return {
           id: g.id,
-          name: g.name,
+          // בשיחת direct מציגים את שם החבר האחר (לא את groups.name הסטטי); בקבוצה — השם המשותף.
+          name: g.type === 'direct' ? (otherNameMap[g.id] ?? g.name) : g.name,
           type: g.type as 'direct' | 'group',
           avatar_url: g.avatar_url,
           updated_at: g.updated_at,
