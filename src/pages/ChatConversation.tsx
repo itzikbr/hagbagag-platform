@@ -116,8 +116,27 @@ export default function ChatConversation() {
       ]) as { data: DBMessage[] | null; error: { message: string } | null }
       if (mErr) throw new Error(mErr.message || 'messages error')
 
+      // שם התצוגה בשיחת direct: groups.name נשמר סטטית לפי מבט-היוצר ולכן שגוי לצד
+      // השני. גוזרים מהחבר האחר (user_id ≠ המשתמש המחובר), כמו ב-ChatList. כשל כאן הוא
+      // קוסמטי בלבד → fallback רך לשם המאוחסן, בלי להכשיל את פתיחת השיחה.
+      let displayName = gData.name
+      if (gData.type === 'direct' && user) {
+        const { data: others } = await Promise.race([
+          supabase.from('group_members').select('user_id').eq('group_id', groupId).is('left_at', null).neq('user_id', user.id).limit(1),
+          timeout,
+        ]) as { data: { user_id: string }[] | null }
+        const otherId = others?.[0]?.user_id
+        if (otherId) {
+          const { data: u } = await Promise.race([
+            supabase.from('users').select('full_name').eq('id', otherId).single(),
+            timeout,
+          ]) as { data: { full_name: string } | null }
+          if (u?.full_name) displayName = u.full_name
+        }
+      }
+
       return {
-        group: { id: gData.id, name: gData.name, type: gData.type as 'direct' | 'group', memberCount: count ?? 0 },
+        group: { id: gData.id, name: displayName, type: gData.type as 'direct' | 'group', memberCount: count ?? 0 },
         messages: (msgs ?? []) as DBMessage[],
       }
     } finally {
