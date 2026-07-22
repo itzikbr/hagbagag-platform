@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth, useIsAdmin } from '../hooks/useAuth'
 import Avatar from '../components/Avatar'
+import { reportClient, errDetail } from '../lib/report'
 
 interface GroupRow {
   id: string
@@ -168,6 +169,7 @@ export default function ChatList() {
 
       if (lastErr) {
         console.error('[chatlist] loadGroups failed after retries:', lastErr)
+        reportClient({ where: 'chatlist-load-failed', online: navigator.onLine, background, ...errDetail(lastErr) })
       } else if (rows) {
         setGroups(rows)
         loadedOnce.current = true

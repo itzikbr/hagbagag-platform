@@ -1,7 +1,8 @@
 import { create } from 'zustand'
 import { supabase } from '../lib/supabase'
 import { isAdminEmail } from '../lib/roles'
-import type { User } from '@supabase/supabase-js'
+import { queryWithRetry } from '../lib/dbRetry'
+import type { User, Session } from '@supabase/supabase-js'
 
 export type UserRole = 'admin' | 'manager' | 'office' | 'field_worker' | 'external'
 
@@ -34,17 +35,18 @@ export const useAuth = create<AuthState>((set, get) => ({
   // שליפת פרופיל מטבלת users
   // ──────────────────────────────────────────────
   _fetchProfile: async (userId: string) => {
-    const { data, error } = await supabase
-      .from('users')
-      .select('id, full_name, role, avatar_url')
-      .eq('id', userId)
-      .single()
-
-    if (error) {
-      console.error('שגיאה בשליפת פרופיל:', error.message)
+    // timeout+retry דרך ה-helper המשותף — שאילתה תקועה (stall של רענון-token/cold-start)
+    // לא תתלה את האתחול לנצח. כשל אחרי ריטריי → null (האפליקציה עולה בכל זאת;
+    // isAdmin מבוסס-אימייל ולכן עדיין עובד גם בלי פרופיל).
+    try {
+      const data = await queryWithRetry<UserProfile>(() =>
+        supabase.from('users').select('id, full_name, role, avatar_url').eq('id', userId).single()
+      )
+      return data
+    } catch (e) {
+      console.error('שליפת פרופיל נכשלה אחרי ריטריי:', e)
       return null
     }
-    return data as UserProfile
   },
 
   // ──────────────────────────────────────────────
@@ -83,12 +85,26 @@ export const useAuth = create<AuthState>((set, get) => ({
   initialize: async () => {
     set({ loading: true })
 
-    const { data: { session } } = await supabase.auth.getSession()
+    try {
+      // getSession עטוף ב-timeout+retry: אם רענון ה-token נתקע (cold-start/PWA)
+      // לא נתלה כאן לנצח. כשל → ממשיכים בלי סשן (המשתמש יגיע ל-login).
+      let session: Session | null = null
+      try {
+        const data = await queryWithRetry<{ session: Session | null }>(
+          () => supabase.auth.getSession(),
+          { timeouts: [5000, 8000] },
+        )
+        session = data?.session ?? null
+      } catch (e) {
+        console.error('getSession נכשל אחרי ריטריי — ממשיכים בלי סשן:', e)
+      }
 
-    if (session?.user) {
-      const profile = await get()._fetchProfile(session.user.id)
-      set({ user: session.user, profile, loading: false, initialized: true })
-    } else {
+      if (session?.user) {
+        const profile = await get()._fetchProfile(session.user.id)
+        set({ user: session.user, profile })
+      }
+    } finally {
+      // ⭐ קריטי: תמיד מסמנים initialized — כדי ש-RequireAuth לא ייתקע לנצח על Splash "טוען…".
       set({ loading: false, initialized: true })
     }
 
