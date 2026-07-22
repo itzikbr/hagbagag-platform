@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
+import { queryWithRetry } from '../lib/dbRetry'
 import { useAuth } from '../hooks/useAuth'
 import { DBUser, UserRole } from '../types'
 import Avatar from './Avatar'
@@ -54,11 +55,13 @@ export default function GroupManagementPanel({ group, onClose, onGroupRenamed, o
   async function loadMembers() {
     setLoading(true)
     try {
-      const { data } = await supabase
-        .from('group_members')
-        .select('user_id, can_add_members, users:user_id (full_name, role, avatar_url)')
-        .eq('group_id', group.id)
-        .is('left_at', null)
+      const data = await queryWithRetry<any[]>(() =>
+        supabase
+          .from('group_members')
+          .select('user_id, can_add_members, users:user_id (full_name, role, avatar_url)')
+          .eq('group_id', group.id)
+          .is('left_at', null)
+      )
 
       const mapped: Member[] = (data ?? []).map((row: any) => ({
         user_id: row.user_id,
@@ -75,6 +78,8 @@ export default function GroupManagementPanel({ group, onClose, onGroupRenamed, o
       })
       setMembers(mapped)
       onMembersChanged(mapped.length)
+    } catch (e) {
+      console.error('[group-panel] load members failed after retries:', e)
     } finally {
       setLoading(false)
     }
@@ -344,12 +349,15 @@ function AddMemberModal({ groupId, existingIds, onClose, onAdded }: AddProps) {
   useEffect(() => { loadUsers() }, [])
 
   async function loadUsers() {
-    const { data } = await supabase.from('users')
-      .select('id, full_name, role, avatar_url, is_active')
-      .eq('is_active', true)
-      .order('full_name')
-    const candidates = (data ?? []).filter((u: any) => !existingIds.includes(u.id))
-    setUsers(candidates as DBUser[])
+    try {
+      const data = await queryWithRetry<any[]>(() =>
+        supabase.from('users').select('id, full_name, role, avatar_url, is_active').eq('is_active', true).order('full_name')
+      )
+      const candidates = (data ?? []).filter((u: any) => !existingIds.includes(u.id))
+      setUsers(candidates as DBUser[])
+    } catch (e) {
+      console.error('[group-panel] load users failed after retries:', e)
+    }
   }
 
   const filtered = users.filter(u => u.full_name.toLowerCase().includes(search.toLowerCase()))

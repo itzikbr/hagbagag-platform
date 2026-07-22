@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { queryWithRetry } from '../lib/dbRetry'
 import { reportClient, errDetail } from '../lib/report'
 
 // ============================================================
@@ -99,18 +100,19 @@ export default function MaterialsTab({ workTypes, value, onChange }: Props) {
     let cancelled = false
     ;(async () => {
       try {
-        const cat = await supabase.from('materials_catalog')
-          .select('category_code,category_name,item_code,name,is_default,sort_order')
-          .eq('is_active', true).order('category_code').order('sort_order')
-        if (cat.error) { reportClient({ where: 'materials-catalog-query', online: navigator.onLine, ...errDetail(cat.error) }); throw cat.error }
-
-        const def = await supabase.from('materials_defaults')
-          .select('work_type,roof_type,material_item_code,sort_order').order('sort_order')
-        if (def.error) { reportClient({ where: 'materials-defaults-query', online: navigator.onLine, ...errDetail(def.error) }); throw def.error }
+        const catData = await queryWithRetry<CatalogItem[]>(() =>
+          supabase.from('materials_catalog')
+            .select('category_code,category_name,item_code,name,is_default,sort_order')
+            .eq('is_active', true).order('category_code').order('sort_order')
+        )
+        const defData = await queryWithRetry<DefaultRow[]>(() =>
+          supabase.from('materials_defaults')
+            .select('work_type,roof_type,material_item_code,sort_order').order('sort_order')
+        )
 
         if (cancelled) return
-        setCatalog((cat.data ?? []) as CatalogItem[])
-        setDefaults((def.data ?? []) as DefaultRow[])
+        setCatalog((catData ?? []) as CatalogItem[])
+        setDefaults((defData ?? []) as DefaultRow[])
         setLoaded(true)
       } catch (e) {
         if (cancelled) return

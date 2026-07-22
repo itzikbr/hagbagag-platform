@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { queryWithRetry } from '../lib/dbRetry'
 import { useAuth } from '../hooks/useAuth'
 import { DBUser } from '../types'
 import Avatar from '../components/Avatar'
@@ -32,13 +33,16 @@ export default function NewChat() {
   }, [user?.id])
 
   async function loadContacts() {
-    const { data } = await supabase
-      .from('users')
-      .select('id, full_name, role, avatar_url, is_active')
-      .eq('is_active', true)
-      .order('full_name')
-    setContacts((data ?? []) as DBUser[])
-    setLoading(false)
+    try {
+      const data = await queryWithRetry<DBUser[]>(() =>
+        supabase.from('users').select('id, full_name, role, avatar_url, is_active').eq('is_active', true).order('full_name')
+      )
+      setContacts((data ?? []) as DBUser[])
+    } catch (e) {
+      console.error('[newchat] load contacts failed after retries:', e)
+    } finally {
+      setLoading(false)
+    }
   }
 
   async function openDirectChat(contactId: string) {

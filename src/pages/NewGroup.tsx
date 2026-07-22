@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { queryWithRetry } from '../lib/dbRetry'
 import { useAuth } from '../hooks/useAuth'
 import { DBUser } from '../types'
 import Avatar from '../components/Avatar'
@@ -19,10 +20,14 @@ export default function NewGroup() {
 
   async function loadUsers() {
     if (!user) return
-    const { data } = await supabase.from('users')
-      .select('id, full_name, role, avatar_url, is_active')
-      .eq('is_active', true).neq('id', user.id).order('full_name')
-    setUsers((data ?? []) as DBUser[])
+    try {
+      const data = await queryWithRetry<DBUser[]>(() =>
+        supabase.from('users').select('id, full_name, role, avatar_url, is_active').eq('is_active', true).neq('id', user.id).order('full_name')
+      )
+      setUsers((data ?? []) as DBUser[])
+    } catch (e) {
+      console.error('[newgroup] load users failed after retries:', e)
+    }
   }
 
   const filtered = users.filter(u => u.full_name.toLowerCase().includes(search.toLowerCase()))

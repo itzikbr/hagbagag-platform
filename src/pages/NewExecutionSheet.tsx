@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { queryWithRetry } from '../lib/dbRetry'
 import { useAuth } from '../hooks/useAuth'
 import MaterialsTab, { type SmartMaterials, emptySmartMaterials, normalizeSmartMaterials } from './MaterialsTab'
 
@@ -1157,10 +1158,15 @@ export default function NewExecutionSheet() {
     // רשת תקועה או שגיאה לא-צפויה לא ישאירו את הספינר תלוי לנצח — כיבוי fallback אחרי 8ש׳
     const loadTimeout = setTimeout(() => { if (!cancelled) setLoading(false) }, 8000)
     ;(async () => {
-      const { data: sheet } = await supabase.from('execution_sheets').select('*').eq('id', editId).single()
+      let sheet: any = null, bs: any = null
+      try {
+        sheet = await queryWithRetry<any>(() => supabase.from('execution_sheets').select('*').eq('id', editId).single())
+        bs = await queryWithRetry<any[]>(() => supabase.from('buildings').select('*').eq('sheet_id', editId).order('building_number').limit(1))
+      } catch (e) {
+        console.error('[sheet] טעינת הדף נכשלה אחרי ריטריי:', e)
+      }
       if (cancelled) return
       if (sheet) { sheetIdRef.current = sheet.id }
-      const { data: bs } = await supabase.from('buildings').select('*').eq('sheet_id', editId).order('building_number').limit(1)
       if (cancelled) return
       const b = bs?.[0]
       const wc = (b?.work_content ?? {}) as Partial<SheetForm>

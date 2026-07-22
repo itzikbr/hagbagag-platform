@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { queryWithRetry } from '../lib/dbRetry'
 
 // ══════════════════════════════════════════════════════════════
 // חג בגג — דף ביצוע · מסך צפייה (read-only)
@@ -135,10 +136,14 @@ export default function ExecutionSheetView() {
     if (!id) return
     let cancelled = false
     ;(async () => {
-      const { data: sheet, error: sErr } = await supabase.from('execution_sheets').select('*').eq('id', id).single()
-      if (cancelled) return
-      if (sErr || !sheet) { setError('הדף לא נמצא'); setLoading(false); return }
-      const { data: bs } = await supabase.from('buildings').select('*').eq('sheet_id', id).order('building_number').limit(1)
+      let sheet: any, bs: any
+      try {
+        sheet = await queryWithRetry<any>(() => supabase.from('execution_sheets').select('*').eq('id', id).single())
+        bs = await queryWithRetry<any[]>(() => supabase.from('buildings').select('*').eq('sheet_id', id).order('building_number').limit(1))
+      } catch (e) {
+        if (!cancelled) { console.error('[sheet-view] load failed after retries:', e); setError('הדף לא נמצא'); setLoading(false) }
+        return
+      }
       if (cancelled) return
       const b = bs?.[0]
       const content = (b?.work_content ?? {}) as WorkContent
