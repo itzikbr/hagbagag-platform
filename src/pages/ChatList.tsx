@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth, useIsAdmin } from '../hooks/useAuth'
 import Avatar from '../components/Avatar'
 import { reportClient, errDetail } from '../lib/report'
+import { enablePush, refreshPushIfGranted, isPushSupported } from '../lib/pushNotifications'
 
 interface GroupRow {
   id: string
@@ -25,15 +26,26 @@ export default function ChatList() {
   const logout = useAuth(s => s.logout)
   const profile = useAuth(s => s.profile)
   const isAdmin = useIsAdmin()
+  const [pushPerm, setPushPerm] = useState<NotificationPermission | 'unsupported'>(
+    () => (isPushSupported() ? Notification.permission : 'unsupported')
+  )
 
   const aliveRef = useRef(true)
   const loadedOnce = useRef(false)
   const initialDoneRef = useRef(false)
 
+  async function handleEnablePush() {
+    if (!userId) return
+    const ok = await enablePush(userId)
+    setPushPerm(ok ? 'granted' : (isPushSupported() ? Notification.permission : 'unsupported'))
+  }
+
   useEffect(() => {
     if (!userId) return
     aliveRef.current = true
     loadGroups()
+    // רענון שקט של מנוי ה-push אם ההרשאה כבר ניתנה (מנויי iOS PWA נאבדים ברקע).
+    refreshPushIfGranted(userId)
 
     // Realtime — refresh when a new message arrives in any group
     const channel = supabase
@@ -204,6 +216,16 @@ export default function ChatList() {
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" stroke="rgba(255,255,255,0.7)" strokeWidth="2" strokeLinecap="round"/><polyline points="16 17 21 12 16 7" stroke="rgba(255,255,255,0.7)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/><line x1="21" y1="12" x2="9" y2="12" stroke="rgba(255,255,255,0.7)" strokeWidth="2" strokeLinecap="round"/></svg>
           </button>
+          {pushPerm === 'default' && (
+            <button
+              onClick={handleEnablePush}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}
+              title="הפעל התראות"
+              aria-label="הפעל התראות"
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2Zm6-6V11c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5S10.5 3.17 10.5 4v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2Z" fill="rgba(255,255,255,0.85)"/></svg>
+            </button>
+          )}
           {profile?.full_name && (
             <div
               title={profile.full_name}
