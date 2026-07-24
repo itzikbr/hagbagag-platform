@@ -10,6 +10,7 @@ import NewGroup from './pages/NewGroup'
 import ExecutionSheetsList from './pages/ExecutionSheetsList'
 import NewExecutionSheet from './pages/NewExecutionSheet'
 import ExecutionSheetView from './pages/ExecutionSheetView'
+import SheetsFeed from './pages/SheetsFeed'
 import Contacts from './pages/Contacts'
 import Admin from './pages/Admin'
 import AdminDashboard from './pages/AdminDashboard'
@@ -71,6 +72,7 @@ function PlatformLayout() {
           {/* דפי ביצוע — פתוח לכל משתמש מחובר */}
           <Route path="/sheets"     element={<ExecutionSheetsList />} />
           <Route path="/sheets/new" element={<NewExecutionSheet />} />
+          <Route path="/sheets/feed" element={<SheetsFeed />} />
           <Route path="/sheets/:id/view" element={<ExecutionSheetView />} />
           <Route path="/sheets/:id" element={<NewExecutionSheet />} />
           {/* שיחות — פתוח לכל משתמש מחובר (RLS מבוסס-חברות קובע מה נראה) */}

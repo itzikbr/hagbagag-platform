@@ -376,6 +376,16 @@ export default function ExecutionSheetsList() {
             }}>{filtered.length}</span>
           </button>
 
+          {/* כפתור רצף — כל הדפים ברצף רציף (read-only) */}
+          <button type="button" title="רצף דפי ביצוע"
+            onClick={() => navigate('/sheets/feed')}
+            style={{
+              width: 44, height: 44, borderRadius: '50%', background: '#fff', border: `2px solid ${RED}`,
+              color: RED, cursor: 'pointer', flexShrink: 0, display: 'flex',
+              alignItems: 'center', justifyContent: 'center', fontSize: 20, lineHeight: 1,
+              boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+            }}>📜</button>
+
           {filterOpen && (
             <FilterPanel
               allFillers={allFillers}
