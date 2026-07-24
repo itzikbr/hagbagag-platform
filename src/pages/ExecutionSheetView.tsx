@@ -72,6 +72,7 @@ interface WorkContent {
   documentation?: { photos?: DocItem[]; sketch?: DocItem[]; documents?: DocItem[] }
   notes?: Record<string, string>
   others?: Record<string, string>
+  smartMaterials?: { roofType?: string; rows?: { itemCode?: string; categoryCode?: string; categoryName?: string; name?: string; qty?: string; meter?: string }[] }
 }
 interface ViewData {
   name: string
@@ -421,6 +422,37 @@ export default function ExecutionSheetView() {
             </Grid>
           </Section>
         )}
+
+        {/* חומרים */}
+        {(() => {
+          const rows = c.smartMaterials?.rows ?? []
+          if (!rows.length) return null
+          const groups: { code: string; name: string; rows: typeof rows }[] = []
+          const idx: Record<string, number> = {}
+          for (const r of rows) {
+            const code = r.categoryCode ?? ''
+            if (!(code in idx)) { idx[code] = groups.length; groups.push({ code, name: r.categoryName ?? code, rows: [] }) }
+            groups[idx[code]].rows.push(r)
+          }
+          return (
+            <Section icon="📦" title="חומרים">
+              {groups.map(g => (
+                <div key={g.code}>
+                  <div style={{ padding: '6px 12px 3px', fontSize: 12, fontWeight: 800, color: GREY, background: '#faf7f2', direction: 'rtl' }}>{g.name}</div>
+                  {g.rows.map((r, i) => {
+                    const qtyText = [has(r.qty) ? `כמות ${r.qty}` : '', has(r.meter) ? `${r.meter} מ׳` : ''].filter(Boolean).join(' · ')
+                    return (
+                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, padding: '7px 12px', direction: 'rtl', borderTop: `1px solid ${BORDER}` }}>
+                        <span style={{ fontSize: 15, color: '#111', fontWeight: 600, textAlign: 'right' }}>{r.name}</span>
+                        <span style={{ fontSize: 14, color: GREY, flexShrink: 0 }}>{qtyText || '—'}</span>
+                      </div>
+                    )
+                  })}
+                </div>
+              ))}
+            </Section>
+          )
+        })()}
 
         {/* תיעוד */}
         {(photoCount > 0 || sketchCount > 0 || docCount > 0) && (
