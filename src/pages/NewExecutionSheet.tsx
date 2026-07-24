@@ -434,7 +434,9 @@ function Card({ id, title, tone = 'default', notes, setNotes, notesOpen, toggleN
     : tone === 'green' ? { bg: '#E8F5E9', color: '#1A5A2A' }
     : { bg: '#F8F8F8', color: '#666' }
   const noteEnabled = !!(id && notes && setNotes && notesOpen && toggleNote)
-  const open = noteEnabled && notesOpen!.has(id!)
+  const hasNote = noteEnabled && !!(notes![id!] && notes![id!].trim())
+  // מוצג כשנפתח ידנית (📝) או כשכבר קיימת הערה שמורה — כדי שלא תיעלם בטעינת דף קיים.
+  const open = noteEnabled && (notesOpen!.has(id!) || hasNote)
   return (
     <div style={{
       background: '#fff', margin: '6px 8px', borderRadius: 10,
@@ -448,19 +450,20 @@ function Card({ id, title, tone = 'default', notes, setNotes, notesOpen, toggleN
       }}>
         <span>{title}</span>
         {noteEnabled && (
-          <button type="button" onClick={() => { if (open) setNotes!(id!, ''); toggleNote!(id!) }}
+          <button type="button" onClick={() => toggleNote!(id!)}
             title="הערה" style={{
-              width: 20, height: 20, borderRadius: '50%', border: 'none', flexShrink: 0,
-              background: RED, color: '#fff', cursor: 'pointer', fontSize: 15, lineHeight: 1,
+              width: 22, height: 22, borderRadius: '50%', border: 'none', flexShrink: 0,
+              background: open ? RED : 'rgba(0,0,0,0.12)', cursor: 'pointer', fontSize: 12, lineHeight: 1,
               display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'inherit',
-            }}>{open ? '−' : '＋'}</button>
+            }}>📝</button>
         )}
       </div>
       <div style={{ padding: 12 }}>
         {open && (
-          <textarea dir="rtl" autoFocus rows={2} placeholder="הערה…" value={notes![id!] ?? ''}
+          <textarea dir="rtl" rows={2} placeholder="הערה…" value={notes![id!] ?? ''}
             onChange={e => setNotes!(id!, e.target.value)}
-            style={{ ...inputStyle, height: 'auto', minHeight: 52, padding: 8, resize: 'vertical', marginBottom: 10, lineHeight: 1.4 }} />
+            ref={el => { if (el) { el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px' } }}
+            style={{ ...inputStyle, minHeight: 52, padding: 8, resize: 'none', overflow: 'hidden', marginBottom: 10, lineHeight: 1.4, width: '100%', boxSizing: 'border-box' }} />
         )}
         {children}
       </div>
@@ -1529,7 +1532,7 @@ export default function NewExecutionSheet() {
             </Card>
 
             {form.workTypes.map(key => (
-              <Card key={key} title={WORK_TYPE_LABEL[key]} tone="orange">
+              <Card key={key} id={`wt:${key}`} title={WORK_TYPE_LABEL[key]} tone="orange" {...noteProps}>
                 <WorkBlock typeKey={key} blocks={form.blocks} patch={patchBlocks} others={form.others} setOther={setOther} />
               </Card>
             ))}
