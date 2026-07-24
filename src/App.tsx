@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import { useAuth, useIsAdmin } from './hooks/useAuth'
+import { runningBundle, deployedBundle } from './lib/appVersion'
 import Login from './pages/Login'
 import IosInstallBanner from './components/IosInstallBanner'
 import ChatList from './pages/ChatList'
@@ -100,9 +101,48 @@ function PlatformLayout() {
 
 export default function App() {
   const initialize = useAuth(s => s.initialize)
+  const [updateReady, setUpdateReady] = useState(false)
   useEffect(() => { initialize() }, [initialize])
+
+  // גרסה חדשה זמינה → באנר רענון. בודקים כל דקה + בכל חזרה לפוקוס (תופס PWA
+  // שחוזר מרקע), ומשווים את הבנדל הרץ מול הפרוס. לא מרעננים בכפייה כדי לא לאבד
+  // עריכה באמצע — המשתמש מקיש לרענון.
+  useEffect(() => {
+    const current = runningBundle()
+    if (!current) return
+    let stopped = false
+    const check = async () => {
+      if (stopped || updateReady || document.visibilityState !== 'visible') return
+      const dep = await deployedBundle()
+      if (!stopped && dep && dep !== current) setUpdateReady(true)
+    }
+    const iv = setInterval(check, 60000)
+    document.addEventListener('visibilitychange', check)
+    window.addEventListener('focus', check)
+    check()
+    return () => {
+      stopped = true
+      clearInterval(iv)
+      document.removeEventListener('visibilitychange', check)
+      window.removeEventListener('focus', check)
+    }
+  }, [updateReady])
+
   return (
     <>
+      {updateReady && (
+        <button
+          onClick={() => window.location.reload()}
+          style={{
+            position: 'fixed', top: 0, left: 0, right: 0, zIndex: 6000,
+            background: '#CC0000', color: '#fff', border: 'none', cursor: 'pointer',
+            padding: '10px 14px', fontSize: 14, fontWeight: 700, fontFamily: 'inherit',
+            direction: 'rtl', textAlign: 'center', boxShadow: '0 2px 8px rgba(0,0,0,0.25)',
+          }}
+        >
+          🔄 גרסה חדשה זמינה — הקש לרענון
+        </button>
+      )}
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/*" element={<RequireAuth><PlatformLayout /></RequireAuth>} />
