@@ -2,7 +2,8 @@ import { useNavigate } from 'react-router-dom'
 
 // ============================================================
 // /admin — דשבורד ניהול (איציק בלבד, נשמר ע"י RequireAdmin ב-App).
-// שני כרטיסים: ניהול משתמשים ← /admin/users, קטלוג חומרים ← /admin/materials.
+// כרטיסים: ניהול משתמשים ← /admin/users, קטלוג חומרים ← /admin/materials,
+// ניהול קבוצות ← /admin/groups.
 // ============================================================
 const RED = '#CC0000'
 const BG = '#f0ebe4'
@@ -10,6 +11,7 @@ const BG = '#f0ebe4'
 const CARDS = [
   { title: 'ניהול משתמשים', subtitle: 'שם, תפקיד, הרשאה, פעיל/לא פעיל, סיסמה', icon: '👥', path: '/admin/users' },
   { title: 'ניהול קטלוג חומרים', subtitle: 'קטגוריות ופריטים, מחירים, ברירות מחדל', icon: '🧱', path: '/admin/materials' },
+  { title: 'ניהול קבוצות', subtitle: 'שם קבוצה, הוספת/הסרת משתתפים, מחיקה', icon: '💬', path: '/admin/groups' },
 ]
 
 export default function AdminDashboard() {

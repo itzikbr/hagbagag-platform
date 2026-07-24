@@ -16,6 +16,7 @@ import AdminDashboard from './pages/AdminDashboard'
 import LightningScreen from './pages/LightningScreen'
 import GeminiChat from './pages/GeminiChat'
 import MaterialsAdmin from './pages/MaterialsAdmin'
+import GroupsAdmin from './pages/GroupsAdmin'
 import BottomNav from './components/BottomNav'
 import HubButton from './components/HubButton'
 import ErrorBoundary from './components/ErrorBoundary'
@@ -82,6 +83,7 @@ function PlatformLayout() {
           <Route path="/admin"          element={<RequireAdmin><AdminDashboard /></RequireAdmin>} />
           <Route path="/admin/users"     element={<RequireAdmin><Admin /></RequireAdmin>} />
           <Route path="/admin/materials" element={<RequireAdmin><MaterialsAdmin /></RequireAdmin>} />
+          <Route path="/admin/groups"    element={<RequireAdmin><GroupsAdmin /></RequireAdmin>} />
           <Route path="/itzik"     element={<RequireAdmin><LightningScreen /></RequireAdmin>} />
           <Route path="/gemini"    element={<RequireAdmin><GeminiChat /></RequireAdmin>} />
           <Route path="*"          element={<Navigate to="/sheets" replace />} />
