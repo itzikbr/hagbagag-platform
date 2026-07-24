@@ -599,7 +599,7 @@ function AsbestosBuildingCard({ idx, b, canRemove, onChange, onRemove }: {
         <MiniChipCol label="תשתית" options={ASB_INFRA_OPTS} value={b.infra} onChange={v => set({ infra: v })} />
         <MiniChipCol label="סוג אסבסט" options={ASB_KIND_OPTS} value={b.asbestosKind} onChange={v => set({ asbestosKind: v, asbestosSub: v === 'אחר' ? b.asbestosSub : '', asbestosSubOther: v === 'אחר' ? b.asbestosSubOther : '' })} />
         {b.asbestosKind === 'אחר'
-          ? <MiniSelect label="סוג" options={ASB_SUB_OPTS} value={b.asbestosSub}
+          ? <MiniSelect label="סוג אסבסט" options={ASB_SUB_OPTS} value={b.asbestosSub}
               onChange={v => set({ asbestosSub: v, asbestosSubOther: v === 'אחר' ? b.asbestosSubOther : '' })}
               otherValue={b.asbestosSubOther} onOther={v => set({ asbestosSubOther: v })} />
           : <div style={{ flex: 1 }} />}

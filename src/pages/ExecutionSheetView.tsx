@@ -253,7 +253,7 @@ export function SheetSections({ data, catSort, onOpenGallery }: {
                   {b.ceiling === 'יש' && <Row label="סוג תקרה" value={other(b.ceilingType, b.ceilingTypeOther)} />}
                   <Row label="תשתית" value={b.infra} />
                   <Row label="סוג אסבסט" value={b.asbestosKind} />
-                  {b.asbestosKind === 'אחר' && <Row label="סוג" value={other(b.asbestosSub, b.asbestosSubOther)} />}
+                  {b.asbestosKind === 'אחר' && <Row label="סוג אסבסט" value={other(b.asbestosSub, b.asbestosSubOther)} />}
                   <Row label="קירוי חדש" value={b.newRoof && b.newRoof !== 'ללא' && has(b.newRoofNote) ? `${b.newRoof} — ${b.newRoofNote}` : b.newRoof} />
                 </Grid>
                 {has(b.note) && <Row label="הערה" value={b.note} />}
