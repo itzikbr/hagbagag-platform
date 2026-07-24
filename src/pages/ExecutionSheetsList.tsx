@@ -5,7 +5,8 @@ import { useAuth, useIsAdmin } from '../hooks/useAuth'
 import { reportClient, errDetail } from '../lib/report'
 
 // ── טיפוסים ────────────────────────────────────────────────────
-interface BuildingRow { work_content?: { details?: { customerName?: string; address?: string; orderNumber?: string } } }
+// dt = work_content->details בלבד (הרשימה צריכה רק אותו) — לא מושכים את כל ה-JSON הכבד.
+interface BuildingRow { dt?: { customerName?: string; address?: string; orderNumber?: string } }
 interface SheetRow {
   id: string
   project_name: string
@@ -152,7 +153,7 @@ export default function ExecutionSheetsList() {
     try {
       const query = supabase
         .from('execution_sheets')
-        .select('id, project_name, is_archived, filled_by_name, progress_data, buildings(work_content)')
+        .select('id, project_name, is_archived, filled_by_name, progress_data, buildings(dt:work_content->details)')
         .order('created_at', { ascending: false })
       const { data, error } = await Promise.race([query, timeout]) as
         { data: SheetRow[] | null; error: { message: string } | null }
@@ -250,7 +251,7 @@ export default function ExecutionSheetsList() {
   const decorated: DecoratedSheet[] = sheets
     .filter(s => !!s.is_archived === (view === 'archived'))
     .map(s => {
-      const details = s.buildings?.[0]?.work_content?.details ?? {}
+      const details = s.buildings?.[0]?.dt ?? {}
       const execDate = parseExec(s.progress_data?.execution_date)
       return {
         id: s.id,
