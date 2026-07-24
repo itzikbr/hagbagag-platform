@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { queryWithRetry } from '../lib/dbRetry'
@@ -34,6 +34,7 @@ interface Item {
   price: number
   is_default: boolean
   sort_order: number
+  category_sort: number
   is_active: boolean
 }
 
@@ -62,12 +63,19 @@ export default function MaterialsAdmin() {
   const [flash, setFlash] = useState<string | null>(null)
   const [editor, setEditor] = useState<Editor | null>(null)
   const [saving, setSaving] = useState(false)
+  // סדר קטגוריות (drag-to-reorder)
+  const [order, setOrder] = useState<string[]>([])
+  const [dragCode, setDragCode] = useState<string | null>(null)
+  const orderRef = useRef<string[]>([])
+  const draggingRef = useRef<string | null>(null)
+  const cardRefs = useRef<Record<string, HTMLDivElement | null>>({})
+  useEffect(() => { orderRef.current = order }, [order])
 
   const load = async () => {
     setLoading(true); setLoadError(false)
     try {
       const [cat, def] = await Promise.all([
-        queryWithRetry<Item[]>(() => supabase.from('materials_catalog').select('*').order('category_code').order('sort_order')),
+        queryWithRetry<Item[]>(() => supabase.from('materials_catalog').select('*').order('category_sort').order('sort_order')),
         queryWithRetry<DefaultRow[]>(() => supabase.from('materials_defaults').select('work_type, roof_type, material_item_code')),
       ])
       setItems((cat ?? []) as Item[])
@@ -82,7 +90,58 @@ export default function MaterialsAdmin() {
   }
   useEffect(() => { load() }, [])
 
+  // סדר הקטגוריות נגזר מהנתונים (שנטענים לפי category_sort)
+  useEffect(() => {
+    const cs = new Set<string>(); const codes: string[] = []
+    for (const it of items) if (!cs.has(it.category_code)) { cs.add(it.category_code); codes.push(it.category_code) }
+    setOrder(codes)
+  }, [items])
+
   const toast = (m: string) => { setFlash(m); setTimeout(() => setFlash(null), 1800) }
+
+  // ── גרירה לשינוי סדר קטגוריות (Pointer Events — עובד גם במגע) ──
+  const onDragStart = (e: React.PointerEvent, code: string) => {
+    e.preventDefault()
+    try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId) } catch { /* noop */ }
+    draggingRef.current = code
+    setDragCode(code)
+  }
+  const onDragMove = (e: React.PointerEvent) => {
+    const dragging = draggingRef.current
+    if (!dragging) return
+    const y = e.clientY
+    let target: string | null = null
+    for (const code of Object.keys(cardRefs.current)) {
+      const el = cardRefs.current[code]; if (!el) continue
+      const r = el.getBoundingClientRect()
+      if (y >= r.top && y <= r.bottom) { target = code; break }
+    }
+    if (target && target !== dragging) {
+      setOrder(prev => {
+        const from = prev.indexOf(dragging), to = prev.indexOf(target!)
+        if (from < 0 || to < 0) return prev
+        const next = [...prev]; next.splice(from, 1); next.splice(to, 0, dragging)
+        return next
+      })
+    }
+  }
+  const onDragEnd = async () => {
+    if (!draggingRef.current) return
+    draggingRef.current = null
+    setDragCode(null)
+    const codes = [...orderRef.current]
+    try {
+      for (let i = 0; i < codes.length; i++) {
+        const { error } = await supabase.from('materials_catalog').update({ category_sort: i }).eq('category_code', codes[i])
+        if (error) throw error
+      }
+      setItems(prev => prev.map(x => ({ ...x, category_sort: codes.indexOf(x.category_code) })))
+      toast('הסדר נשמר')
+    } catch (e) {
+      console.error('[materials-admin] reorder failed:', e)
+      toast('שמירת הסדר נכשלה'); load()
+    }
+  }
 
   const categories: { code: string; name: string }[] = []
   const seen = new Set<string>()
@@ -90,6 +149,8 @@ export default function MaterialsAdmin() {
 
   const grouped: Record<string, Item[]> = {}
   for (const it of items) (grouped[it.category_code] ??= []).push(it)
+
+  const catNameByCode: Record<string, string> = Object.fromEntries(categories.map(c => [c.code, c.name]))
 
   // item_code → סט של סוגי-עבודה שבהם הוא ברירת מחדל ברמת סוג-העבודה (roof_type NULL)
   const defWtByItem: Record<string, Set<string>> = {}
@@ -170,11 +231,13 @@ export default function MaterialsAdmin() {
 
       if (editor.mode === 'add') {
         const sortOrder = (grouped[code]?.length ?? 0) + 1
+        // קטגוריה קיימת יורשת את מיקומה; קטגוריה חדשה נוספת בסוף הרשימה
+        const categorySort = grouped[code]?.[0]?.category_sort ?? order.length
         const itemCode = nextItemCode(code)
         const { error } = await supabase.from('materials_catalog').insert({
           category_code: code, category_name: cname, item_code: itemCode,
           name: editor.name.trim(), catalog_number: catalogNumber, price,
-          is_default: false, sort_order: sortOrder, is_active: true,
+          is_default: false, sort_order: sortOrder, category_sort: categorySort, is_active: true,
         })
         if (error) { toast(`הוספה נכשלה: ${error.message}`); return }
         await syncDefaults(itemCode, editor.workTypes)
@@ -217,13 +280,16 @@ export default function MaterialsAdmin() {
           </div>
         ) : items.length === 0 ? (
           <div style={{ textAlign: 'center', color: '#888', padding: 30 }}>אין פריטים בקטלוג</div>
-        ) : categories.map(cat => (
-          <div key={cat.code} style={{ background: '#fff', border: `1px solid ${BORDER}`, borderRadius: 12, margin: '8px 4px', overflow: 'hidden' }}>
-            <div style={{ background: '#faf7f2', padding: '8px 12px', fontWeight: 800, color: RED, borderBottom: `1px solid ${BORDER}`, display: 'flex', gap: 8 }}>
-              <span style={{ flex: 1 }}>{cat.name}</span>
-              <span style={{ fontSize: 12, color: '#999' }}>{cat.code}</span>
+        ) : order.map(code => (
+          <div key={code} ref={el => { cardRefs.current[code] = el }}
+            style={{ background: '#fff', border: `1px solid ${BORDER}`, borderRadius: 12, margin: '8px 4px', overflow: 'hidden', opacity: dragCode === code ? 0.6 : 1, boxShadow: dragCode === code ? '0 6px 16px rgba(0,0,0,0.18)' : undefined }}>
+            <div style={{ background: '#faf7f2', padding: '8px 12px', fontWeight: 800, color: RED, borderBottom: `1px solid ${BORDER}`, display: 'flex', gap: 8, alignItems: 'center' }}>
+              <span onPointerDown={e => onDragStart(e, code)} onPointerMove={onDragMove} onPointerUp={onDragEnd}
+                title="גרור לשינוי סדר" style={{ cursor: 'grab', touchAction: 'none', color: '#c4c0b8', fontSize: 17, lineHeight: 1, userSelect: 'none', padding: '0 2px' }}>⠿</span>
+              <span style={{ flex: 1 }}>{catNameByCode[code]}</span>
+              <span style={{ fontSize: 12, color: '#999' }}>{code}</span>
             </div>
-            {grouped[cat.code].map(it => {
+            {(grouped[code] ?? []).map(it => {
               const wtCount = (defWtByItem[it.item_code]?.size ?? 0)
               return (
                 <div key={it.id} onClick={() => openEdit(it)}
