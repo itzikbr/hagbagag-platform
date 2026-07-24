@@ -12,7 +12,7 @@ function bundleHash(): string {
     const src = Array.from(document.getElementsByTagName('script'))
       .map(el => el.getAttribute('src') || '')
       .find(s => /\/assets\/index-.*\.js/.test(s))
-    return src ? (src.match(/index-([A-Za-z0-9]+)\.js/)?.[1] ?? 'unknown') : 'unknown'
+    return src ? (src.match(/index-([A-Za-z0-9_-]+)\.js/)?.[1] ?? 'unknown') : 'unknown'
   } catch { return 'unknown' }
 }
 
