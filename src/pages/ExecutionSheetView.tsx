@@ -139,6 +139,16 @@ export default function ExecutionSheetView() {
   const [data, setData] = useState<ViewData | null>(null)
   const [gallery, setGallery] = useState<{ title: string; imgs: { url: string; note?: string }[] } | null>(null)
   const [galLoading, setGalLoading] = useState(false)
+  // סדר הקטגוריות מהקטלוג (category_sort — סדר הגרירה במסך הניהול), למיון סקשן החומרים
+  const [catSort, setCatSort] = useState<Record<string, number>>({})
+  useEffect(() => {
+    supabase.from('materials_catalog').select('category_code,category_sort').then(({ data }) => {
+      if (!data) return
+      const m: Record<string, number> = {}
+      for (const r of data as { category_code: string; category_sort: number }[]) if (!(r.category_code in m)) m[r.category_code] = r.category_sort
+      setCatSort(m)
+    })
+  }, [])
 
   // פותח גלריית תמונות — חותם מחדש את ה-paths (bucket פרטי 'sheet-images'),
   // עם נפילה לכתובות השמורות אם החתימה נכשלת.
@@ -434,6 +444,7 @@ export default function ExecutionSheetView() {
             if (!(code in idx)) { idx[code] = groups.length; groups.push({ code, name: r.categoryName ?? code, rows: [] }) }
             groups[idx[code]].rows.push(r)
           }
+          groups.sort((a, b) => (catSort[a.code] ?? 999) - (catSort[b.code] ?? 999))
           return (
             <Section icon="📦" title="חומרים">
               {groups.map(g => (
