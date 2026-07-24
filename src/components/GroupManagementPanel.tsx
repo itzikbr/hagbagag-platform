@@ -121,30 +121,48 @@ export default function GroupManagementPanel({ group, onClose, onGroupRenamed, o
     const msg = isSelf ? 'לצאת מהקבוצה?' : `להסיר את ${member.full_name}?`
     if (!window.confirm(msg)) return
 
-    const { error } = await supabase.from('group_members')
-      .update({ left_at: new Date().toISOString() })
-      .eq('group_id', group.id)
-      .eq('user_id', member.user_id)
+    try {
+      // .select() מחזיר את השורות שעודכנו בפועל — אם RLS חוסם, error=null אך 0 שורות,
+      // ואז "הסרה" מדומה נראית כהצלחה בעוד המשתמש נשאר. לכן בודקים שבאמת עודכנה שורה.
+      const { data, error } = await supabase.from('group_members')
+        .update({ left_at: new Date().toISOString() })
+        .eq('group_id', group.id)
+        .eq('user_id', member.user_id)
+        .is('left_at', null)
+        .select('user_id')
 
-    if (error) {
-      alert('שגיאה: ' + error.message)
-      return
-    }
+      if (error) { alert('שגיאה בהסרה: ' + error.message); return }
+      if (!data || data.length === 0) {
+        alert('ההסרה לא בוצעה — ייתכן שאין הרשאה או שהמשתמש כבר הוסר.')
+        loadMembers()
+        return
+      }
 
-    await supabase.from('messages').insert({
-      group_id: group.id, sender_id: null, sender_name: 'מערכת',
-      content: isSelf
-        ? `${member.full_name} עזב/ה את הקבוצה`
-        : `${profile?.full_name ?? 'מנהל'} הסיר/ה את ${member.full_name}`,
-      message_type: 'system',
-    })
+      // הודעת מערכת — fire-and-forget: כשל בה לא יבטל את ההסרה שכבר בוצעה.
+      supabase.from('messages').insert({
+        group_id: group.id, sender_id: null, sender_name: 'מערכת',
+        content: isSelf
+          ? `${member.full_name} עזב/ה את הקבוצה`
+          : `${profile?.full_name ?? 'מנהל'} הסיר/ה את ${member.full_name}`,
+        message_type: 'system',
+      }).then(({ error: e }) => { if (e) console.warn('[group-panel] system message insert failed:', e.message) })
 
-    if (isSelf) {
-      onClose()
-      // Navigate away — the parent will handle since user lost access
-      window.location.href = '/chats'
-    } else {
+      if (isSelf) {
+        onClose()
+        window.location.href = '/chats'
+        return
+      }
+
+      // עדכון אופטימי מיידי (שלא יהיה תלוי בעיתוי הרענון), ואז רענון אמיתי לאימות.
+      setMembers(prev => {
+        const next = prev.filter(m => m.user_id !== member.user_id)
+        onMembersChanged(next.length)
+        return next
+      })
       loadMembers()
+    } catch (e: any) {
+      console.error('[group-panel] remove failed:', e)
+      alert('שגיאה בהסרה: ' + (e?.message ?? 'לא ידועה'))
     }
   }
 
