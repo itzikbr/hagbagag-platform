@@ -1326,6 +1326,18 @@ export default function NewExecutionSheet() {
       alert(`השמירה נכשלה: ${e instanceof Error ? e.message : String(e)}`)
     } finally { savingRef.current = false; setSaving(false) }
   }
+  // צפייה: שומרים טיוטה קודם (כדי שהצפייה תשקף את המצב הנוכחי) ואז עוברים למסך הצפייה.
+  async function viewSheet() {
+    if (savingRef.current) return
+    savingRef.current = true; setSaving(true)
+    try {
+      const sid = await withTimeout(persist('field'))
+      if (sid) navigate(`/sheets/${sid}/view`)
+      else alert(lastErrRef.current ?? 'השמירה נכשלה')
+    } catch (e) {
+      alert(`השמירה נכשלה: ${e instanceof Error ? e.message : String(e)}`)
+    } finally { savingRef.current = false; setSaving(false) }
+  }
   async function submit() {
     if (savingRef.current) return
     savingRef.current = true; setSaving(true)
@@ -1583,7 +1595,11 @@ export default function NewExecutionSheet() {
       )}
 
       {/* Footer */}
-      <div style={{ flexShrink: 0, background: '#fff', borderTop: `1px solid ${BORDER}`, padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
+      <div style={{ flexShrink: 0, background: '#fff', borderTop: `1px solid ${BORDER}`, padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 10 }}>
+        <button onClick={viewSheet} disabled={saving} title="צפייה בדף" style={{
+          flexShrink: 0, background: '#fff', color: '#444', border: `1.5px solid ${BORDER}`, borderRadius: 10,
+          padding: '13px 12px', fontSize: 14, fontWeight: 700, cursor: saving ? 'default' : 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap',
+        }}>👁️ צפייה</button>
         <button onClick={saveDraft} disabled={saving} style={{
           flex: 1, background: '#fff', color: RED, border: `1.5px solid ${RED}`, borderRadius: 10,
           padding: 13, fontSize: 15, fontWeight: 700, cursor: saving ? 'default' : 'pointer', fontFamily: 'inherit',
