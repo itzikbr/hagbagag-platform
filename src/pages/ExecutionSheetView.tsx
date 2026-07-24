@@ -121,6 +121,11 @@ function Row({ label, value }: { label: string; value?: string }) {
   )
 }
 // זוג שדות בגריד 2 עמודות (מדלג על ריקים)
+const galRow: React.CSSProperties = {
+  width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10,
+  padding: '9px 12px', direction: 'rtl', background: 'none', border: 'none', borderTop: '1px solid #f0ebe6',
+  cursor: 'pointer', fontFamily: 'inherit',
+}
 function Grid({ children }: { children: React.ReactNode }) {
   return <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0, direction: 'rtl' }}>{children}</div>
 }
@@ -131,6 +136,32 @@ export default function ExecutionSheetView() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [data, setData] = useState<ViewData | null>(null)
+  const [gallery, setGallery] = useState<{ title: string; imgs: { url: string; note?: string }[] } | null>(null)
+  const [galLoading, setGalLoading] = useState(false)
+
+  // פותח גלריית תמונות — חותם מחדש את ה-paths (bucket פרטי 'sheet-images'),
+  // עם נפילה לכתובות השמורות אם החתימה נכשלת.
+  async function openGallery(title: string, items: DocItem[]) {
+    const list = (items ?? []).filter(it => it.path || it.url)
+    if (!list.length) return
+    setGalLoading(true); setGallery({ title, imgs: [] })
+    try {
+      const paths = list.filter(it => it.path).map(it => it.path!) as string[]
+      const signed: Record<string, string> = {}
+      if (paths.length) {
+        const { data: s } = await supabase.storage.from('sheet-images').createSignedUrls(paths, 60 * 60)
+        for (const row of s ?? []) if (row.path && row.signedUrl) signed[row.path] = row.signedUrl
+      }
+      const imgs = list.map(it => ({ url: (it.path && signed[it.path]) || it.url || '', note: it.note })).filter(x => x.url)
+      setGallery({ title, imgs })
+    } catch (e) {
+      console.error('[sheet-view] gallery sign failed:', e)
+      const imgs = list.map(it => ({ url: it.url || '', note: it.note })).filter(x => x.url)
+      setGallery({ title, imgs })
+    } finally {
+      setGalLoading(false)
+    }
+  }
 
   useEffect(() => {
     if (!id) return
@@ -394,8 +425,24 @@ export default function ExecutionSheetView() {
         {/* תיעוד */}
         {(photoCount > 0 || sketchCount > 0 || docCount > 0) && (
           <Section icon="📷" title="תיעוד">
-            <Row label="תמונות שטח" value={photoCount ? String(photoCount) : undefined} />
-            <Row label="סקיצות" value={sketchCount ? String(sketchCount) : undefined} />
+            {photoCount > 0 && (
+              <button type="button" onClick={() => openGallery('תמונות שטח', doc.photos ?? [])} style={galRow}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: GREY }}>תמונות שטח</span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontSize: 16, fontWeight: 600, color: '#111' }}>{photoCount}</span>
+                  <span style={{ color: HEADER_RED, fontSize: 20, lineHeight: 1 }}>›</span>
+                </span>
+              </button>
+            )}
+            {sketchCount > 0 && (
+              <button type="button" onClick={() => openGallery('סקיצות', doc.sketch ?? [])} style={galRow}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: GREY }}>סקיצות</span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontSize: 16, fontWeight: 600, color: '#111' }}>{sketchCount}</span>
+                  <span style={{ color: HEADER_RED, fontSize: 20, lineHeight: 1 }}>›</span>
+                </span>
+              </button>
+            )}
             <Row label="מסמכים" value={docCount ? String(docCount) : undefined} />
           </Section>
         )}
@@ -425,6 +472,26 @@ export default function ExecutionSheetView() {
           </Section>
         )}
       </div>
+
+      {/* Gallery overlay */}
+      {gallery && (
+        <div onClick={() => setGallery(null)} style={{ position: 'fixed', inset: 0, zIndex: 5000, background: 'rgba(0,0,0,0.92)', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', flexShrink: 0, direction: 'rtl' }} onClick={e => e.stopPropagation()}>
+            <span style={{ flex: 1, color: '#fff', fontWeight: 800, fontSize: 16 }}>{gallery.title}</span>
+            <button onClick={() => setGallery(null)} style={{ background: 'rgba(255,255,255,0.15)', color: '#fff', border: 'none', borderRadius: '50%', width: 34, height: 34, fontSize: 18, cursor: 'pointer', lineHeight: 1, fontFamily: 'inherit' }}>✕</button>
+          </div>
+          <div className="no-scrollbar" style={{ flex: 1, overflowY: 'auto', padding: '0 10px 20px', display: 'flex', flexDirection: 'column', gap: 14 }} onClick={e => e.stopPropagation()}>
+            {galLoading && <div style={{ color: '#fff', textAlign: 'center', padding: 30 }}>טוען…</div>}
+            {!galLoading && gallery.imgs.length === 0 && <div style={{ color: '#fff', textAlign: 'center', padding: 30 }}>אין תמונות להצגה</div>}
+            {gallery.imgs.map((im, i) => (
+              <div key={i}>
+                <img src={im.url} alt="" style={{ width: '100%', borderRadius: 10, display: 'block' }} />
+                {has(im.note) && <div style={{ color: 'rgba(255,255,255,0.85)', fontSize: 13, textAlign: 'right', direction: 'rtl', marginTop: 4 }}>{im.note}</div>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Footer */}
       <div style={{ flexShrink: 0, background: '#fff', borderTop: `1px solid ${BORDER}`, padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
