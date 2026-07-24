@@ -58,6 +58,7 @@ interface CatalogItem {
   category_name: string
   item_code: string
   name: string
+  catalog_number: string | null
   is_default: boolean
   sort_order: number
 }
@@ -102,7 +103,7 @@ export default function MaterialsTab({ workTypes, value, onChange }: Props) {
       try {
         const catData = await queryWithRetry<CatalogItem[]>(() =>
           supabase.from('materials_catalog')
-            .select('category_code,category_name,item_code,name,is_default,sort_order')
+            .select('category_code,category_name,item_code,name,catalog_number,is_default,sort_order')
             .eq('is_active', true).order('category_code').order('sort_order')
         )
         const defData = await queryWithRetry<DefaultRow[]>(() =>
@@ -190,6 +191,10 @@ export default function MaterialsTab({ workTypes, value, onChange }: Props) {
     grouped[r.categoryCode].push(r)
   }
 
+  // item_code → מספר קטלוגי (lookup חי מהקטלוג; לא נשמר ב-SmartRow)
+  const catNumByCode: Record<string, string> = {}
+  for (const c of catalog) if (c.catalog_number) catNumByCode[c.item_code] = c.catalog_number
+
   if (!loaded) return <div style={{ textAlign: 'center', color: '#888', padding: 30 }}>טוען חומרים…</div>
   if (loadErr) return <div style={{ textAlign: 'center', color: RED, padding: 30 }}>טעינת הקטלוג נכשלה — נסה לרענן</div>
 
@@ -236,7 +241,10 @@ export default function MaterialsTab({ workTypes, value, onChange }: Props) {
               <div style={{ padding: '4px 8px 8px' }}>
                 {rows.map(r => (
                   <div key={r.key} style={rowWrap}>
-                    <div style={{ flex: 1, fontSize: 14, fontWeight: 600, color: '#333', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.name}</div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: '#333', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</div>
+                      {catNumByCode[r.itemCode] && <div style={{ fontSize: 11, color: '#999', marginTop: 1 }}>מק״ט {catNumByCode[r.itemCode]}</div>}
+                    </div>
                     <input dir="rtl" inputMode="decimal" placeholder="כמות" value={r.qty} onChange={e => updateRow(r.key, { qty: e.target.value })} style={numInput} />
                     <input dir="rtl" inputMode="decimal" placeholder="מטר" value={r.meter} onChange={e => updateRow(r.key, { meter: e.target.value })} style={numInput} />
                     <button type="button" title="שכפל" onClick={() => duplicateRow(r.key)} style={dupBtn}>
@@ -289,7 +297,7 @@ export default function MaterialsTab({ workTypes, value, onChange }: Props) {
               {modalItems.map(c => (
                 <button key={c.item_code} type="button" onClick={() => { addItem(c); setModalOpen(false) }} style={modalRow}>
                   <span style={{ flex: 1, textAlign: 'right', fontSize: 14, color: '#333' }}>{c.name}</span>
-                  <span style={{ fontSize: 11, color: '#999' }}>{c.category_name} · {c.item_code}</span>
+                  <span style={{ fontSize: 11, color: '#999' }}>{c.category_name}{c.catalog_number ? ` · מק״ט ${c.catalog_number}` : ''}</span>
                 </button>
               ))}
               {modalItems.length === 0 && <div style={{ textAlign: 'center', color: '#999', padding: 20 }}>לא נמצאו פריטים</div>}
