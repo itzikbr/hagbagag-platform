@@ -170,6 +170,9 @@ export default function ExecutionSheetsList() {
     const seq = ++reqSeq.current
     if (!background) { setLoading(true); setError(null) }
 
+    // beacon בתחילת טעינת foreground — כדי לראות שהטעינה בכלל מתחילה במכשיר
+    if (!background) reportClient({ where: 'sheets-load-start', online: navigator.onLine, ua: navigator.userAgent.slice(0, 60) })
+
     const t0 = Date.now()
     try {
       // הבקשה הראשונה אחרי cold-start ב-PWA של iOS נתקעת (~10ש') בעוד הריטריי
