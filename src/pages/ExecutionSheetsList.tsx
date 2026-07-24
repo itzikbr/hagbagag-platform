@@ -111,6 +111,8 @@ export default function ExecutionSheetsList() {
   const aliveRef = useRef(true)
   const initialDoneRef = useRef(false)
   const listRef = useRef<HTMLDivElement>(null)
+  const sentinelRef = useRef<HTMLDivElement>(null)
+  const [visible, setVisible] = useState(20)   // רינדור מדורג — 20 ראשונים ואז +20 בגלילה
   const didScrollRef = useRef<string>('')   // אחרון שגללנו אליו: view
 
   useEffect(() => {
@@ -283,6 +285,22 @@ export default function ExecutionSheetsList() {
     : bySearch
   const filtered = byFiller.sort((a, b) => (a.execMs - b.execMs) || a.name.localeCompare(b.name, 'he'))
 
+  // ── רינדור מדורג (lazy) — מרנדרים רק חלון, מגדילים בגלילה לתחתית ──────────
+  // מוודאים שהעוגן "היום/עתיד" (שאליו גוללים אוטומטית) תמיד בתוך החלון.
+  const todayIdx = filtered.findIndex(d => d.when === 'today' || d.when === 'future')
+  const effectiveVisible = todayIdx >= 0 ? Math.max(visible, todayIdx + 6) : visible
+  const shown = filtered.slice(0, effectiveVisible)
+  // איפוס החלון כשמשתנים תצוגה/חיפוש/סינון
+  useEffect(() => { setVisible(20) }, [view, search, selectedFillers])
+  // הגדלת החלון כשה-sentinel בתחתית נכנס לתצוגה
+  useEffect(() => {
+    const s = sentinelRef.current, root = listRef.current
+    if (!s || !root || effectiveVisible >= filtered.length) return
+    const io = new IntersectionObserver(es => { if (es[0].isIntersecting) setVisible(v => v + 20) }, { root, rootMargin: '300px' })
+    io.observe(s)
+    return () => io.disconnect()
+  }, [effectiveVisible, filtered.length])
+
   // גלילה כך שהיום/עתיד יופיעו בראש התצוגה (למעלה=עבר, למטה=עתיד). פעם אחת לכל view.
   useEffect(() => {
     if (loading) return
@@ -431,7 +449,7 @@ export default function ExecutionSheetsList() {
           <EmptyState view={view} hasSearch={q.length > 0} onCreate={() => navigate('/sheets/new')} />
         )}
 
-        {!loading && !error && filtered.map((d, i) => (
+        {!loading && !error && shown.map((d, i) => (
           <SheetCard key={d.id} d={d} index={i} view={view}
             onOpen={() => navigate(`/sheets/${d.id}`)}
             onView={() => navigate(`/sheets/${d.id}/view`)}
@@ -439,6 +457,9 @@ export default function ExecutionSheetsList() {
             onRestore={() => askConfirm('להחזיר לרשימה הפעילה?', false, () => restoreSheet(d.id))}
             onDelete={() => askConfirm('למחוק את הדף? פעולה זו אינה הפיכה', true, () => deleteSheet(d.id))} />
         ))}
+        {!loading && !error && effectiveVisible < filtered.length && (
+          <div ref={sentinelRef} style={{ height: 1 }} />
+        )}
       </div>
 
       {/* FAB — new sheet (active view only) */}

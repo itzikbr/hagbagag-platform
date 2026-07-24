@@ -58,9 +58,28 @@ export default function ChatConversation() {
   const [showPanel, setShowPanel] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
 
-  // Scroll to bottom when messages change
+  // ── lazy-load הודעות: 50 אחרונות + טעינת ישנות בגלילה למעלה ──
+  const PAGE_SIZE = 50
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const [hasMore, setHasMore] = useState(false)
+  const [loadingOlder, setLoadingOlder] = useState(false)
+  const oldestRef = useRef<string | null>(null)
+  const prependingRef = useRef(false)
+  const didInitialScrollRef = useRef(false)
+
+  // גלילה: טעינה ראשונית → לתחתית; הודעה חדשה → לתחתית רק אם קרובים לתחתית;
+  // prepend (טעינת ישנות) → המיקום נשמר ידנית ב-loadOlder, לכן מדלגים כאן.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    if (prependingRef.current) { prependingRef.current = false; return }
+    const el = scrollRef.current
+    if (!el) return
+    if (!didInitialScrollRef.current) {
+      el.scrollTop = el.scrollHeight
+      if (messages.length) didInitialScrollRef.current = true
+      return
+    }
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 150
+    if (nearBottom) el.scrollTop = el.scrollHeight
   }, [messages])
 
   // Load group info + messages + subscribe to realtime
@@ -110,8 +129,9 @@ export default function ChatConversation() {
         timeout,
       ]) as { count: number | null }
 
+      // 50 ההודעות האחרונות (desc), נהפוך ל-asc לתצוגה. (בעבר נטענו 100 הישנות — גם באג.)
       const { data: msgs, error: mErr } = await Promise.race([
-        supabase.from('messages').select('*').eq('group_id', groupId).eq('is_deleted', false).order('created_at', { ascending: true }).limit(100),
+        supabase.from('messages').select('*').eq('group_id', groupId).eq('is_deleted', false).order('created_at', { ascending: false }).limit(PAGE_SIZE),
         timeout,
       ]) as { data: DBMessage[] | null; error: { message: string } | null }
       if (mErr) throw new Error(mErr.message || 'messages error')
@@ -137,7 +157,7 @@ export default function ChatConversation() {
 
       return {
         group: { id: gData.id, name: displayName, type: gData.type as 'direct' | 'group', memberCount: count ?? 0 },
-        messages: (msgs ?? []) as DBMessage[],
+        messages: ((msgs ?? []) as DBMessage[]).slice().reverse(),   // asc לתצוגה
       }
     } finally {
       clearTimeout(timer)
@@ -147,6 +167,9 @@ export default function ChatConversation() {
   async function loadGroupAndMessages() {
     if (!groupId) return
     setLoading(true)
+    didInitialScrollRef.current = false
+    oldestRef.current = null
+    setHasMore(false)
 
     // timeout מדורג + retry כמו ב-ChatList: ניסיון ראשון קצר תופס stall של cold-start
     // ב-PWA של iOS, והריטריי (שמצליח) קופץ מהר. שגיאה חולפת בשאילתת ה-groups כבר לא
@@ -165,11 +188,50 @@ export default function ChatConversation() {
       } else if (result) {
         setGroupInfo(result.group)
         setMessages(result.messages)
+        oldestRef.current = result.messages[0]?.created_at ?? null
+        setHasMore(result.messages.length >= PAGE_SIZE)
       }
       // result === null → הקבוצה לא קיימת; groupInfo נשאר null → "שיחה לא נמצאה"
     } finally {
       setLoading(false)   // תמיד — לא נתקעים על "טוען…"
     }
+  }
+
+  // טעינת הודעות ישנות (בגלילה לראש) — prepend תוך שמירת מיקום הגלילה
+  async function loadOlder() {
+    if (loadingOlder || !hasMore || !oldestRef.current || !groupId) return
+    setLoadingOlder(true)
+    const el = scrollRef.current
+    const prevH = el?.scrollHeight ?? 0
+    const prevT = el?.scrollTop ?? 0
+    try {
+      const { data } = await supabase.from('messages').select('*')
+        .eq('group_id', groupId).eq('is_deleted', false)
+        .lt('created_at', oldestRef.current)
+        .order('created_at', { ascending: false }).limit(PAGE_SIZE)
+      const older = ((data ?? []) as DBMessage[]).slice().reverse()
+      if (older.length) {
+        prependingRef.current = true
+        setMessages(prev => {
+          const ids = new Set(prev.map(m => m.id))
+          return [...older.filter(m => !ids.has(m.id)), ...prev]
+        })
+        oldestRef.current = older[0].created_at
+        requestAnimationFrame(() => {
+          const el2 = scrollRef.current
+          if (el2) el2.scrollTop = prevT + (el2.scrollHeight - prevH)
+        })
+      }
+      setHasMore(older.length >= PAGE_SIZE)
+    } catch (e) {
+      console.error('[chat] load older failed:', e)
+    } finally {
+      setLoadingOlder(false)
+    }
+  }
+  const onMessagesScroll = () => {
+    const el = scrollRef.current
+    if (el && el.scrollTop < 80 && hasMore && !loadingOlder) loadOlder()
   }
 
   const handleSend = async () => {
@@ -321,7 +383,10 @@ export default function ChatConversation() {
       </div>
 
       {/* Messages */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '8px 12px' }} className="no-scrollbar">
+      <div ref={scrollRef} onScroll={onMessagesScroll} style={{ flex: 1, overflowY: 'auto', padding: '8px 12px' }} className="no-scrollbar">
+        {loadingOlder && (
+          <div style={{ textAlign: 'center', color: '#8696A0', fontSize: 12, padding: '6px 0' }}>טוען הודעות קודמות…</div>
+        )}
         {grouped.map(({ date, msgs }) => (
           <div key={date}>
             {/* Date separator */}
