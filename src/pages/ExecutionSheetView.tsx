@@ -400,6 +400,24 @@ export default function ExecutionSheetView() {
           </Section>
         )}
 
+        {/* הערות סוגי עבודה */}
+        {(() => {
+          const wtNotes = wt
+            .map(k => ({ label: WORK_TYPE_LABEL[k] ?? k, note: (c.notes?.[`wt:${k}`] ?? '').trim() }))
+            .filter(x => x.note)
+          if (!wtNotes.length) return null
+          return (
+            <Section icon="📝" title="הערות סוגי עבודה">
+              {wtNotes.map((x, i) => (
+                <div key={i} style={{ padding: '7px 12px', direction: 'rtl' }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: GREY, marginBottom: 2 }}>{x.label}</div>
+                  <div style={{ fontSize: 15, color: '#111', textAlign: 'right', whiteSpace: 'pre-wrap', lineHeight: 1.4 }}>{x.note}</div>
+                </div>
+              ))}
+            </Section>
+          )
+        })()}
+
         {/* הערה כללית */}
         {has(generalNote) && (
           <Section icon="📝" title="הערה כללית">
