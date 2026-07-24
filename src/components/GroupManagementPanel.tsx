@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { queryWithRetry } from '../lib/dbRetry'
-import { useAuth } from '../hooks/useAuth'
+import { useAuth, useIsAdmin } from '../hooks/useAuth'
 import { DBUser, UserRole } from '../types'
 import Avatar from './Avatar'
 
@@ -40,7 +40,9 @@ function roleLabel(role: string): string {
 
 export default function GroupManagementPanel({ group, onClose, onGroupRenamed, onGroupDeleted, onMembersChanged }: Props) {
   const { user, profile } = useAuth()
-  const isManager = profile?.role === 'manager'
+  // ניהול קבוצה (שם/הוספה/הסרה/מחיקה) מותר לאדמין — מבוסס-אימייל, בדיוק כמו שה-RLS
+  // בודק (is_admin()). היה קודם role==='manager' שגם הסתיר מהאדמין וגם לא תאם RLS.
+  const canManage = useIsAdmin()
 
   const [members, setMembers] = useState<Member[]>([])
   const [loading, setLoading] = useState(true)
@@ -202,7 +204,7 @@ export default function GroupManagementPanel({ group, onClose, onGroupRenamed, o
           ) : (
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ fontSize: 22, fontWeight: 600, color: '#111' }}>{group.name}</span>
-              {isManager && (
+              {canManage && (
                 <button onClick={() => setEditingName(true)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }} title="ערוך שם">
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
                     <path d="M11 4H4C3.45 4 3 4.45 3 5V20C3 20.55 3.45 21 4 21H19C19.55 21 20 20.55 20 20V13" stroke="#54656F" strokeWidth="2" strokeLinecap="round"/>
@@ -225,7 +227,7 @@ export default function GroupManagementPanel({ group, onClose, onGroupRenamed, o
             <span style={{ fontSize: 13, color: '#8696A0', fontWeight: 600 }}>
               {members.length} משתתפים
             </span>
-            {isManager && (
+            {canManage && (
               <button
                 onClick={() => setShowAddMember(true)}
                 style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#CC0000', fontWeight: 600, fontSize: 14, padding: 4 }}
@@ -240,7 +242,7 @@ export default function GroupManagementPanel({ group, onClose, onGroupRenamed, o
           ) : (
             members.map(m => {
               const isSelf = m.user_id === user?.id
-              const canRemove = isSelf || isManager
+              const canRemove = isSelf || canManage
               return (
                 <div key={m.user_id} style={{ display: 'flex', alignItems: 'center', padding: '10px 16px', gap: 12, borderBottom: '1px solid #F0F2F5' }}>
                   <Avatar name={m.full_name} size={44} />
@@ -272,7 +274,7 @@ export default function GroupManagementPanel({ group, onClose, onGroupRenamed, o
         </div>
 
         {/* Danger zone */}
-        {isManager && (
+        {canManage && (
           <div style={{ marginTop: 12, background: '#fff', padding: '8px 0' }}>
             {!confirmDelete ? (
               <button
