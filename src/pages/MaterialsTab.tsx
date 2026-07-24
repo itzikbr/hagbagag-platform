@@ -61,6 +61,7 @@ interface CatalogItem {
   catalog_number: string | null
   is_default: boolean
   sort_order: number
+  category_sort: number
 }
 interface DefaultRow {
   work_type: string
@@ -103,7 +104,7 @@ export default function MaterialsTab({ workTypes, value, onChange }: Props) {
       try {
         const catData = await queryWithRetry<CatalogItem[]>(() =>
           supabase.from('materials_catalog')
-            .select('category_code,category_name,item_code,name,catalog_number,is_default,sort_order')
+            .select('category_code,category_name,item_code,name,catalog_number,is_default,sort_order,category_sort')
             .eq('is_active', true).order('category_code').order('sort_order')
         )
         const defData = await queryWithRetry<DefaultRow[]>(() =>
@@ -190,6 +191,10 @@ export default function MaterialsTab({ workTypes, value, onChange }: Props) {
     if (!grouped[r.categoryCode]) { grouped[r.categoryCode] = []; catOrder.push(r.categoryCode); catName[r.categoryCode] = r.categoryName }
     grouped[r.categoryCode].push(r)
   }
+  // סדר הקטגוריות לפי category_sort מהקטלוג (סדר הגרירה במסך הניהול); לא-ידועים בסוף
+  const catSortByCode: Record<string, number> = {}
+  for (const c of catalog) if (!(c.category_code in catSortByCode)) catSortByCode[c.category_code] = c.category_sort
+  catOrder.sort((a, b) => (catSortByCode[a] ?? 999) - (catSortByCode[b] ?? 999))
 
   // item_code → מספר קטלוגי (lookup חי מהקטלוג; לא נשמר ב-SmartRow)
   const catNumByCode: Record<string, string> = {}
