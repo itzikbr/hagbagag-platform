@@ -92,40 +92,26 @@ export default function ChatList() {
 
       const groupIds = memberOf.map(m => m.group_id)
 
-      // 2. Get groups data
-      const { data: groupsData, error: groupsErr } = await Promise.race([
-        supabase.from('groups').select('id, name, type, avatar_url, updated_at').in('id', groupIds).order('updated_at', { ascending: false }),
-        timeout,
-      ]) as { data: Omit<GroupRow, 'lastMessage' | 'lastMessageTime' | 'unreadCount'>[] | null; error: { message: string } | null }
-      if (groupsErr) throw new Error(groupsErr.message || 'groups error')
+      // 2–4: קבוצות + הודעות + שמות החברים האחרים — במקביל (סבב אחד במקום שלושה).
+      //    שם החבר בשיחת direct נשלף עם embed של users, בלי סבב נוסף.
+      const race = <T,>(p: PromiseLike<T>) => Promise.race([p, timeout]) as Promise<T>
+      const [gRes, mRes, oRes] = await Promise.all([
+        race(supabase.from('groups').select('id, name, type, avatar_url, updated_at').in('id', groupIds).order('updated_at', { ascending: false })),
+        race(supabase.from('messages').select('group_id, content, sender_name, created_at, message_type').in('group_id', groupIds).eq('is_deleted', false).order('created_at', { ascending: false })),
+        race(supabase.from('group_members').select('group_id, users:user_id(full_name)').in('group_id', groupIds).is('left_at', null).neq('user_id', userId)),
+      ]) as [
+        { data: Omit<GroupRow, 'lastMessage' | 'lastMessageTime' | 'unreadCount'>[] | null; error: { message: string } | null },
+        { data: { group_id: string; content: string | null; created_at: string; message_type: string }[] | null; error: { message: string } | null },
+        { data: { group_id: string; users: { full_name: string } | null }[] | null },
+      ]
+      if (gRes.error) throw new Error(gRes.error.message || 'groups error')
+      const groupsData = gRes.data
+      const allMessages = mRes.data
 
-      // 3. Get last message for each group
-      const { data: allMessages } = await Promise.race([
-        supabase.from('messages').select('group_id, content, sender_name, created_at, message_type').in('group_id', groupIds).eq('is_deleted', false).order('created_at', { ascending: false }),
-        timeout,
-      ]) as { data: { group_id: string; content: string | null; created_at: string; message_type: string }[] | null; error: { message: string } | null }
-
-      // 4. שם בן-השיח לשיחות direct. groups.name נשמר סטטית לפי מבט-היוצר (שם הצד
-      //    השני מבחינת מי שיצר), ולכן שגוי לצד השני — הוא רואה את שמו-שלו. גוזרים את
-      //    שם התצוגה מהחבר האחר בפועל (user_id ≠ המשתמש המחובר).
-      const { data: otherMembers } = await Promise.race([
-        supabase.from('group_members').select('group_id, user_id').in('group_id', groupIds).is('left_at', null).neq('user_id', userId),
-        timeout,
-      ]) as { data: { group_id: string; user_id: string }[] | null }
-
-      const otherIds = [...new Set((otherMembers ?? []).map(m => m.user_id))]
-      const nameById: Record<string, string> = {}
-      if (otherIds.length) {
-        const { data: otherUsers } = await Promise.race([
-          supabase.from('users').select('id, full_name').in('id', otherIds),
-          timeout,
-        ]) as { data: { id: string; full_name: string }[] | null }
-        for (const u of otherUsers ?? []) nameById[u.id] = u.full_name
-      }
-      // group_id → שם החבר האחר (בשיחת direct יש בדיוק אחד כזה)
+      // group_id → שם החבר האחר (embed של users; בשיחת direct יש בדיוק אחד כזה)
       const otherNameMap: Record<string, string> = {}
-      for (const m of otherMembers ?? []) {
-        if (!otherNameMap[m.group_id] && nameById[m.user_id]) otherNameMap[m.group_id] = nameById[m.user_id]
+      for (const m of oRes.data ?? []) {
+        if (!otherNameMap[m.group_id] && m.users?.full_name) otherNameMap[m.group_id] = m.users.full_name
       }
 
       // Build a map: group_id → last message
@@ -167,9 +153,12 @@ export default function ChatList() {
       // timeout מדורג כמו ב-ExecutionSheetsList: ניסיון 1 קצר תופס stall של cold-start
       // ב-PWA של iOS והריטריי קופץ מהר; מאוחר יותר ארוך יותר לרשת איטית אמיתית.
       const TIMEOUTS = [4000, 8000, 12000, 12000]
+      const t0 = Date.now()
       let rows: GroupRow[] | null = null
       let lastErr: unknown = null
+      let usedAttempts = 0
       for (let attempt = 0; attempt < TIMEOUTS.length; attempt++) {
+        usedAttempts = attempt + 1
         try { rows = await fetchGroupsOnce(TIMEOUTS[attempt]); lastErr = null; break }
         catch (e) {
           lastErr = e
@@ -183,6 +172,7 @@ export default function ChatList() {
         console.error('[chatlist] loadGroups failed after retries:', lastErr)
         reportClient({ where: 'chatlist-load-failed', online: navigator.onLine, background, ...errDetail(lastErr) })
       } else if (rows) {
+        if (!background) reportClient({ where: 'chatlist-load-ok', ms: Date.now() - t0, attempts: usedAttempts, online: navigator.onLine })
         setGroups(rows)
         loadedOnce.current = true
       }

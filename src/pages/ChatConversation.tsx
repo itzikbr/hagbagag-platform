@@ -113,51 +113,41 @@ export default function ChatConversation() {
   async function fetchConversationOnce(timeoutMs: number): Promise<{ group: GroupInfo; messages: DBMessage[] } | null> {
     let timer: ReturnType<typeof setTimeout> | undefined
     const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('timeout')), timeoutMs) })
+    const race = <T,>(p: PromiseLike<T>) => Promise.race([p, timeout]) as Promise<T>
     try {
-      const { data: gData, error: gErr } = await Promise.race([
-        supabase.from('groups').select('id, name, type').eq('id', groupId).single(),
-        timeout,
-      ]) as { data: { id: string; name: string; type: string } | null; error: { message: string; code?: string } | null }
+      // כל השאילתות במקביל — כולן תלויות רק ב-groupId, לא זו בזו. שם החבר בשיחת direct
+      // נשלף ישירות עם embed של users (בלי סבב נוסף). כך: סבב רשת אחד במקום ~5 סדרתיים.
+      const [gRes, cRes, mRes, oRes] = await Promise.all([
+        race(supabase.from('groups').select('id, name, type').eq('id', groupId).single()),
+        race(supabase.from('group_members').select('*', { count: 'exact', head: true }).eq('group_id', groupId).is('left_at', null)),
+        race(supabase.from('messages').select('*').eq('group_id', groupId).eq('is_deleted', false).order('created_at', { ascending: false }).limit(PAGE_SIZE)),
+        race(supabase.from('group_members').select('user_id, users:user_id(full_name)').eq('group_id', groupId).is('left_at', null).neq('user_id', user?.id ?? '').limit(1)),
+      ]) as [
+        { data: { id: string; name: string; type: string } | null; error: { message: string; code?: string } | null },
+        { count: number | null },
+        { data: DBMessage[] | null; error: { message: string } | null },
+        { data: { user_id: string; users: { full_name: string } | null }[] | null },
+      ]
+
+      const gErr = gRes.error
       if (gErr) {
         if (gErr.code === 'PGRST116') return null   // הקבוצה לא קיימת → not-found סופי
         throw new Error(gErr.message || 'groups error') // רשת/רענון-טוקן/5xx → ריטריי
       }
+      const gData = gRes.data
       if (!gData) return null
+      if (mRes.error) throw new Error(mRes.error.message || 'messages error')
 
-      const { count } = await Promise.race([
-        supabase.from('group_members').select('*', { count: 'exact', head: true }).eq('group_id', groupId).is('left_at', null),
-        timeout,
-      ]) as { count: number | null }
-
-      // 50 ההודעות האחרונות (desc), נהפוך ל-asc לתצוגה. (בעבר נטענו 100 הישנות — גם באג.)
-      const { data: msgs, error: mErr } = await Promise.race([
-        supabase.from('messages').select('*').eq('group_id', groupId).eq('is_deleted', false).order('created_at', { ascending: false }).limit(PAGE_SIZE),
-        timeout,
-      ]) as { data: DBMessage[] | null; error: { message: string } | null }
-      if (mErr) throw new Error(mErr.message || 'messages error')
-
-      // שם התצוגה בשיחת direct: groups.name נשמר סטטית לפי מבט-היוצר ולכן שגוי לצד
-      // השני. גוזרים מהחבר האחר (user_id ≠ המשתמש המחובר), כמו ב-ChatList. כשל כאן הוא
-      // קוסמטי בלבד → fallback רך לשם המאוחסן, בלי להכשיל את פתיחת השיחה.
+      // בשיחת direct מציגים את שם החבר האחר (מה-embed); אחרת השם המאוחסן.
       let displayName = gData.name
-      if (gData.type === 'direct' && user) {
-        const { data: others } = await Promise.race([
-          supabase.from('group_members').select('user_id').eq('group_id', groupId).is('left_at', null).neq('user_id', user.id).limit(1),
-          timeout,
-        ]) as { data: { user_id: string }[] | null }
-        const otherId = others?.[0]?.user_id
-        if (otherId) {
-          const { data: u } = await Promise.race([
-            supabase.from('users').select('full_name').eq('id', otherId).single(),
-            timeout,
-          ]) as { data: { full_name: string } | null }
-          if (u?.full_name) displayName = u.full_name
-        }
+      if (gData.type === 'direct') {
+        const other = oRes.data?.[0]?.users?.full_name
+        if (other) displayName = other
       }
 
       return {
-        group: { id: gData.id, name: displayName, type: gData.type as 'direct' | 'group', memberCount: count ?? 0 },
-        messages: ((msgs ?? []) as DBMessage[]).slice().reverse(),   // asc לתצוגה
+        group: { id: gData.id, name: displayName, type: gData.type as 'direct' | 'group', memberCount: cRes.count ?? 0 },
+        messages: ((mRes.data ?? []) as DBMessage[]).slice().reverse(),   // asc לתצוגה
       }
     } finally {
       clearTimeout(timer)
@@ -175,10 +165,13 @@ export default function ChatConversation() {
     // ב-PWA של iOS, והריטריי (שמצליח) קופץ מהר. שגיאה חולפת בשאילתת ה-groups כבר לא
     // נבלעת → מנסים שוב, ורק כשהקבוצה באמת לא קיימת (או אחרי מיצוי הריטריי) מציגים "לא נמצאה".
     const TIMEOUTS = [4000, 8000, 12000, 12000]
+    const t0 = Date.now()
     try {
       let result: { group: GroupInfo; messages: DBMessage[] } | null = null
       let lastErr: unknown = null
+      let usedAttempts = 0
       for (let i = 0; i < TIMEOUTS.length; i++) {
+        usedAttempts = i + 1
         try { result = await fetchConversationOnce(TIMEOUTS[i]); lastErr = null; break }
         catch (e) { lastErr = e; if (i < TIMEOUTS.length - 1) await new Promise(r => setTimeout(r, 250)) }
       }
@@ -186,6 +179,7 @@ export default function ChatConversation() {
         console.error('[chat] load failed after retries:', lastErr)
         reportClient({ where: 'chat-load-failed', online: navigator.onLine, ...errDetail(lastErr) })
       } else if (result) {
+        reportClient({ where: 'chat-load-ok', ms: Date.now() - t0, attempts: usedAttempts, online: navigator.onLine })
         setGroupInfo(result.group)
         setMessages(result.messages)
         oldestRef.current = result.messages[0]?.created_at ?? null
