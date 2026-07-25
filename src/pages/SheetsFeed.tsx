@@ -172,8 +172,13 @@ export default function SheetsFeed() {
         ) : shown.map((it, idx) => {
           const st = STATUS_META[it.view.status] ?? STATUS_META.field
           return (
-            <div key={it.id}>
-              {idx > 0 && <div style={{ borderTop: '3px solid #d8cec4', margin: '20px 10px 0' }} />}
+            // כל דף = כרטיס עצמאי: גבול + צל + רווח ברור ביניהם (הפרדה ויזואלית חזקה
+            // במקום קו דק). פס אדום עליון מסמן את תחילת כל דף.
+            <div key={it.id} style={{
+              margin: idx === 0 ? '10px 8px 0' : '24px 8px 0',
+              background: '#fff', border: '1px solid #e0d8d0', borderTop: `4px solid ${HEADER_RED}`,
+              borderRadius: 12, overflow: 'hidden', boxShadow: '0 2px 12px rgba(0,0,0,0.09)',
+            }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px 4px', direction: 'rtl' }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 18, fontWeight: 800, color: '#111', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.view.name}</div>
@@ -185,6 +190,14 @@ export default function SheetsFeed() {
                 <button onClick={() => navigate(`/sheets/${it.id}/view`)} title="פתח דף" style={{ background: 'none', border: 'none', cursor: 'pointer', color: HEADER_RED, fontSize: 22, lineHeight: 1, fontFamily: 'inherit', flexShrink: 0 }}>‹</button>
               </div>
               <SheetSections data={it.view} catSort={catSort} onOpenGallery={openGallery} />
+
+              {/* כפתור עריכה בתחתית הכרטיס → מסך העריכה */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '4px 12px 12px', direction: 'rtl' }}>
+                <button onClick={() => navigate(`/sheets/${it.id}`)} title="ערוך דף" style={{
+                  background: HEADER_RED, color: '#fff', border: 'none', borderRadius: 10,
+                  padding: '9px 22px', fontSize: 14, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
+                }}>✏️ ערוך</button>
+              </div>
             </div>
           )
         })}
