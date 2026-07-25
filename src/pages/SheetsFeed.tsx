@@ -98,7 +98,7 @@ export default function SheetsFeed() {
       clearTimeout(reloadTimer.current)
       reloadTimer.current = setTimeout(() => load(true), 500)
     }
-    const ch = supabase.channel('sheets-feed')
+    const ch = supabase.channel(`sheets-feed-${Math.random().toString(36).slice(2)}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'execution_sheets' }, scheduleReload)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'buildings' }, scheduleReload)
       .subscribe()

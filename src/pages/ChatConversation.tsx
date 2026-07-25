@@ -88,7 +88,7 @@ export default function ChatConversation() {
     loadGroupAndMessages()
 
     const channel = supabase
-      .channel(`group-${groupId}`)
+      .channel(`group-${groupId}-${Math.random().toString(36).slice(2)}`)
       .on('postgres_changes', {
         event: 'INSERT',
         schema: 'public',

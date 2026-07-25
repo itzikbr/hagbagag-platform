@@ -49,7 +49,7 @@ export default function ChatList() {
 
     // Realtime — refresh when a new message arrives in any group
     const channel = supabase
-      .channel('chatlist-messages')
+      .channel(`chatlist-messages-${Math.random().toString(36).slice(2)}`)
       .on('postgres_changes', {
         event: 'INSERT',
         schema: 'public',
