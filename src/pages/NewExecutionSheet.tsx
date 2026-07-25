@@ -1163,8 +1163,11 @@ export default function NewExecutionSheet() {
     ;(async () => {
       let sheet: any = null, bs: any = null
       try {
-        sheet = await queryWithRetry<any>(() => supabase.from('execution_sheets').select('*').eq('id', editId).single())
-        bs = await queryWithRetry<any[]>(() => supabase.from('buildings').select('*').eq('sheet_id', editId).order('building_number').limit(1))
+        // שתי השאילתות תלויות רק ב-editId, לא זו בזו — במקביל (סבב רשת אחד במקום שניים).
+        ;[sheet, bs] = await Promise.all([
+          queryWithRetry<any>(() => supabase.from('execution_sheets').select('*').eq('id', editId).single()),
+          queryWithRetry<any[]>(() => supabase.from('buildings').select('*').eq('sheet_id', editId).order('building_number').limit(1)),
+        ])
       } catch (e) {
         console.error('[sheet] טעינת הדף נכשלה אחרי ריטריי:', e)
       }
@@ -1196,17 +1199,18 @@ export default function NewExecutionSheet() {
         notes: wc.notes ?? {},
         others: wc.others ?? {},
       }
-      // חתימות URL מחדש לתמונות (bucket פרטי)
+      // חתימות URL מחדש לתמונות (bucket פרטי) — כל החתימות במקביל (במקום סבב סדרתי לכל תמונה).
+      const toSign: DocItem[] = []
       for (const sec of ['photos', 'sketch', 'documents'] as const) {
-        const arr = merged.documentation[sec]
-        for (const it of arr) {
-          if (it.path) {
-            const { data: signed } = await supabase.storage.from('sheet-images').createSignedUrl(it.path, 60 * 60 * 24 * 365)
-            it.url = signed?.signedUrl ?? it.url
-          }
+        for (const it of merged.documentation[sec]) {
           it.noteOpen = false
+          if (it.path) toSign.push(it)
         }
       }
+      await Promise.all(toSign.map(async it => {
+        const { data: signed } = await supabase.storage.from('sheet-images').createSignedUrl(it.path, 60 * 60 * 24 * 365)
+        it.url = signed?.signedUrl ?? it.url
+      }))
       if (!cancelled) { setForm(merged); setLoading(false) }
     })().catch(e => {
       console.error('[sheet] טעינת הדף נכשלה:', e)

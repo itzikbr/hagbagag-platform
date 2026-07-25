@@ -487,8 +487,11 @@ export default function ExecutionSheetView() {
     ;(async () => {
       let sheet: any, bs: any
       try {
-        sheet = await queryWithRetry<any>(() => supabase.from('execution_sheets').select('*').eq('id', id).single())
-        bs = await queryWithRetry<any[]>(() => supabase.from('buildings').select('*').eq('sheet_id', id).order('building_number').limit(1))
+        // שתי השאילתות תלויות רק ב-id מה-URL, לא זו בזו — במקביל (סבב רשת אחד במקום שניים).
+        ;[sheet, bs] = await Promise.all([
+          queryWithRetry<any>(() => supabase.from('execution_sheets').select('*').eq('id', id).single()),
+          queryWithRetry<any[]>(() => supabase.from('buildings').select('*').eq('sheet_id', id).order('building_number').limit(1)),
+        ])
       } catch (e) {
         if (!cancelled) { console.error('[sheet-view] load failed after retries:', e); setError('הדף לא נמצא'); setLoading(false) }
         return

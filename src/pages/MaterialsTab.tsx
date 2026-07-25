@@ -102,15 +102,18 @@ export default function MaterialsTab({ workTypes, value, onChange }: Props) {
     let cancelled = false
     ;(async () => {
       try {
-        const catData = await queryWithRetry<CatalogItem[]>(() =>
-          supabase.from('materials_catalog')
-            .select('category_code,category_name,item_code,name,catalog_number,is_default,sort_order,category_sort')
-            .eq('is_active', true).order('category_code').order('sort_order')
-        )
-        const defData = await queryWithRetry<DefaultRow[]>(() =>
-          supabase.from('materials_defaults')
-            .select('work_type,roof_type,material_item_code,sort_order').order('sort_order')
-        )
+        // קטלוג + ברירות מחדל — שתי טבלאות בלתי-תלויות, במקביל (סבב רשת אחד במקום שניים).
+        const [catData, defData] = await Promise.all([
+          queryWithRetry<CatalogItem[]>(() =>
+            supabase.from('materials_catalog')
+              .select('category_code,category_name,item_code,name,catalog_number,is_default,sort_order,category_sort')
+              .eq('is_active', true).order('category_code').order('sort_order')
+          ),
+          queryWithRetry<DefaultRow[]>(() =>
+            supabase.from('materials_defaults')
+              .select('work_type,roof_type,material_item_code,sort_order').order('sort_order')
+          ),
+        ])
 
         if (cancelled) return
         setCatalog((catData ?? []) as CatalogItem[])
