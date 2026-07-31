@@ -68,6 +68,36 @@ const ALL_SUPPLIERS = ['הגן הנדסה', 'אופק', 'פוליפח', 'א.ד �
 const TEAM_LEADS = ['עמאד', 'סמיר', 'עלי']
 const SUBCONTRACTORS = ['זכי', 'מאלק', 'חאזם', 'וויסאם', 'מחמוד', 'האני', 'גל', 'אחר']
 
+// ── טאב עסקה (deals) — שכבה ניהולית/כספית ──────────────────────
+// שמות 7 שלבי העסקה (stage 1-7 ב-DB). index 0 = שלב 1.
+const DEAL_STAGES = ['טיוטא', 'מאושרת זמני', 'מאושרת לביצוע', 'בביצוע', 'בוצעה', 'מוסדי לגביה', 'סגורה']
+// רשומת deal — מקביל 1:1 לעמודות טבלת deals (מפתח order_number, קשר 1-לרבים לדפי ביצוע)
+interface DealRow {
+  id: string
+  order_number: string
+  customer_name: string | null
+  total_price: number | null
+  price_before_vat: number | null
+  materials_cost: number | null; labor_cost: number | null; logistics_cost: number | null
+  materials_pct: number | null; labor_pct: number | null; logistics_pct: number | null
+  stage: number
+  stage_updated_at: string | null; stage_updated_by: string | null
+  paid_amount: number | null; balance_due: number | null; balance_note: string | null
+  updated_at: string
+}
+// ₪ עם מפריד אלפים; null/לא-מספר → מוחזר ריק (הקורא מחליט אם להסתיר שורה)
+function ils(n: number | null | undefined): string {
+  if (n == null || isNaN(Number(n))) return ''
+  return '₪' + Number(n).toLocaleString('he-IL')
+}
+function fmtDateTime(iso?: string | null): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return String(iso)
+  return d.toLocaleDateString('he-IL', { day: 'numeric', month: 'numeric', year: '2-digit' }) +
+    ' ' + d.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })
+}
+
 interface WorkTypeMeta { key: string; label: string }
 const WORK_TYPES: WorkTypeMeta[] = [
   { key: 'asbestos',    label: '🟠 החלפת אסבסט' },
@@ -150,6 +180,8 @@ interface RoofReplaceBlock {
   topThickness: string; bottomThickness: string  // פנל מבודד
   fillType: string                               // פנל מבודד: סוג מילוי
   tileType: string                               // רעפים: סוג רעף
+  supplier: string                               // ספק חומר הקירוי — עצמאי, לא תלוי בתאריך הספקים הגלובלי
+  orderDate: string                              // תאריך הזמנת חומר הקירוי — עצמאי
 }
 interface AluminumBlock { shade: string; meters: string; coating: string[] }
 interface GuttersBlock {
@@ -250,7 +282,7 @@ function normalizeAsbestos(raw: unknown): AsbestosBlock {
 function emptyBlocks(): WorkBlocks {
   return {
     asbestos:    emptyAsbestos(),
-    roofReplace: { existingRoof: '', newRoof: '', construction: '', slope: '', overhang: '', overhangNote: '', sheetThickness: '', color: '', topThickness: '', bottomThickness: '', fillType: '', tileType: '' },
+    roofReplace: { existingRoof: '', newRoof: '', construction: '', slope: '', overhang: '', overhangNote: '', sheetThickness: '', color: '', topThickness: '', bottomThickness: '', fillType: '', tileType: '', supplier: '', orderDate: '' },
     aluminum:    { shade: '', meters: '', coating: [] },
     gutters:     { type: '', guttersM: '', guttersSegments: '', downUnits: '', downSegments: '' },
     insulation:  { type: '', area: '', thickness: '' },
@@ -1033,11 +1065,153 @@ function SummaryLine({ icon, text, bg }: { icon: string; text: string; bg: strin
   )
 }
 
-function ProgressTab({ progress, workTypes, onChange, others, setOther }: {
+// תאריך יום (YYYY-MM-DD) → d.m.yy
+function fmtDay(iso?: string): string {
+  if (!iso) return ''
+  const d = new Date(`${iso}T00:00:00`)
+  if (isNaN(d.getTime())) return String(iso)
+  return d.toLocaleDateString('he-IL', { day: 'numeric', month: 'numeric', year: '2-digit' })
+}
+// שורת קריאה בלבד (לכרטיס השטח המצומצם)
+function ReadRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10, padding: '9px 4px', direction: 'rtl', borderTop: `1px solid #f3efe9` }}>
+      <span style={{ fontSize: 13, fontWeight: 700, color: '#555', flexShrink: 0 }}>{label}</span>
+      <span style={{ fontSize: 15, fontWeight: 700, color: '#111', textAlign: 'right' }}>{value}</span>
+    </div>
+  )
+}
+
+// ── כרטיס "שלב העסקה" — שורה מכווצת + dropdown של 7 השלבים ──────
+function StageCard({ deal, onStageChange }: { deal: DealRow; onStageChange: (stage: number) => void }) {
+  const [open, setOpen] = useState(false)
+  const idx = Math.min(Math.max(deal.stage, 1), 7) - 1
+  return (
+    <Card title="שלב העסקה" tone="blue">
+      <button type="button" onClick={() => setOpen(o => !o)} style={{
+        width: '100%', display: 'flex', alignItems: 'center', gap: 10, background: '#fff',
+        border: `1px solid ${BORDER}`, borderRadius: 10, padding: '10px 12px', cursor: 'pointer',
+        direction: 'rtl', fontFamily: 'inherit',
+      }}>
+        <span style={{ width: 26, height: 26, borderRadius: '50%', background: RED, color: '#fff', fontSize: 13, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{deal.stage}</span>
+        <span style={{ flex: 1, textAlign: 'right', fontSize: 15, fontWeight: 800, color: '#111' }}>{DEAL_STAGES[idx]}</span>
+        <span style={{ fontSize: 13, fontWeight: 700, color: '#888', fontVariantNumeric: 'tabular-nums' }}>{deal.stage}/7</span>
+        <span style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .15s', color: '#888', fontSize: 13 }}>⌄</span>
+      </button>
+      {open && (
+        <div style={{ marginTop: 6, border: `1px solid ${BORDER}`, borderRadius: 10, overflow: 'hidden' }}>
+          {DEAL_STAGES.map((name, i) => {
+            const st = i + 1
+            const cur = st === deal.stage
+            return (
+              <button key={st} type="button" onClick={() => { setOpen(false); if (!cur) onStageChange(st) }} style={{
+                width: '100%', display: 'flex', alignItems: 'center', gap: 10, background: cur ? '#FFF0F0' : '#fff',
+                border: 'none', borderTop: i > 0 ? `1px solid #f3efe9` : 'none', padding: '9px 12px', cursor: 'pointer',
+                direction: 'rtl', fontFamily: 'inherit',
+              }}>
+                <span style={{ width: 22, height: 22, borderRadius: '50%', background: cur ? RED : '#eee', color: cur ? '#fff' : '#777', fontSize: 12, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{st}</span>
+                <span style={{ flex: 1, textAlign: 'right', fontSize: 14, fontWeight: cur ? 800 : 600, color: cur ? RED : '#333' }}>{name}</span>
+                {cur && <span style={{ color: RED, fontSize: 14 }}>✓</span>}
+              </button>
+            )
+          })}
+        </div>
+      )}
+      <div style={{ fontSize: 11.5, color: '#999', marginTop: 8, direction: 'rtl', lineHeight: 1.5 }}>
+        ✏️ ניתן לעדכן ידנית, או אוטומטית ממקור מחובר (כשיתחבר)
+        {deal.stage_updated_by ? <><br />עודכן ע״י {deal.stage_updated_by}{deal.stage_updated_at ? ` · ${fmtDateTime(deal.stage_updated_at)}` : ''}</> : null}
+      </div>
+    </Card>
+  )
+}
+
+// ── כרטיס ניהולי (כספים/גביה) — badge 🔒 בכותרת + תג מקור בתחתית ──
+function MgmtCard({ title, children, updatedAt }: { title: string; children: React.ReactNode; updatedAt: string }) {
+  return (
+    <div style={{ background: '#fff', margin: '6px 8px', borderRadius: 10, boxShadow: '0 1px 3px rgba(0,0,0,0.07)', overflow: 'hidden' }}>
+      <div style={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.3, background: '#F0EBF5', color: '#7A4CA0', padding: '5px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', direction: 'rtl' }}>
+        <span>{title}</span>
+        <span style={{ fontSize: 10, fontWeight: 800 }}>🔒 ניהול בלבד</span>
+      </div>
+      <div style={{ padding: 12 }}>
+        {children}
+        <div style={{ fontSize: 11, color: '#999', marginTop: 10, direction: 'rtl' }}>מקור: דוח פריוריטי · נכון ל־{fmtDateTime(updatedAt)}</div>
+      </div>
+    </div>
+  )
+}
+function MoneyRow({ label, value, pct }: { label: string; value: string; pct?: number | null }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10, padding: '8px 4px', direction: 'rtl', borderTop: `1px solid #f3efe9` }}>
+      <span style={{ fontSize: 13, fontWeight: 600, color: '#555' }}>{label}</span>
+      <span style={{ fontSize: 15, fontWeight: 800, color: '#111' }}>
+        {value}
+        {pct != null ? <span style={{ fontSize: 12, fontWeight: 600, color: '#999', marginRight: 6 }}> ({pct}%)</span> : null}
+      </span>
+    </div>
+  )
+}
+function FinancesCard({ deal }: { deal: DealRow }) {
+  return (
+    <MgmtCard title="כספים" updatedAt={deal.updated_at}>
+      {deal.total_price != null && <MoneyRow label="סה״כ (כולל מע״מ)" value={ils(deal.total_price)} />}
+      {deal.price_before_vat != null && <MoneyRow label="לפני מע״מ" value={ils(deal.price_before_vat)} />}
+      {/* עלויות + אחוזים — רק אם השדה קיים (לא null); null → לא מציגים שורה כלל */}
+      {deal.materials_cost != null && <MoneyRow label="חומרים" value={ils(deal.materials_cost)} pct={deal.materials_pct} />}
+      {deal.labor_cost != null && <MoneyRow label="עבודה" value={ils(deal.labor_cost)} pct={deal.labor_pct} />}
+      {deal.logistics_cost != null && <MoneyRow label="לוגיסטיקה" value={ils(deal.logistics_cost)} pct={deal.logistics_pct} />}
+    </MgmtCard>
+  )
+}
+function CollectionCard({ deal }: { deal: DealRow }) {
+  const note = (deal.balance_note ?? '').trim()
+  return (
+    <>
+      {note && (
+        <div style={{ margin: '6px 8px 0', background: '#FFF8E6', border: '1px solid #F0D98C', borderRadius: 10, padding: '8px 12px', direction: 'rtl', display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+          <span style={{ flexShrink: 0 }}>⚠️</span>
+          <span style={{ fontSize: 12.5, fontWeight: 600, color: '#7a5b00', lineHeight: 1.4 }}>{note}</span>
+        </div>
+      )}
+      <MgmtCard title="גביה" updatedAt={deal.updated_at}>
+        {deal.paid_amount != null && <MoneyRow label="שולם" value={ils(deal.paid_amount)} />}
+        {deal.balance_due != null && <MoneyRow label="יתרה לגביה" value={ils(deal.balance_due)} />}
+      </MgmtCard>
+    </>
+  )
+}
+
+function ProgressTab({ progress, workTypes, onChange, others, setOther, isFull, address, deal, dealLoading, onStageChange, roofActive, roofSupplier, roofOrderDate, onRoofSupplier, onRoofOrderDate }: {
   progress: ProgressData; workTypes: string[]; onChange: (p: Partial<ProgressData>) => void
   others: Record<string, string>; setOther: (k: string, v: string) => void
+  isFull: boolean; address: string
+  deal: DealRow | null; dealLoading: boolean; onStageChange: (stage: number) => void
+  roofActive: boolean; roofSupplier: string; roofOrderDate: string
+  onRoofSupplier: (v: string) => void; onRoofOrderDate: (v: string) => void
 }) {
   const p = progress
+
+  // ── תצוגת שטח מצומצמת (field/external): 4 שדות בלבד, קריאה בלבד ──
+  if (!isFull) {
+    const permit = p.asbestos_permit.approval_date
+      ? { text: '✓ התקבל', bg: '#E8F5E9', color: '#1A5A2A' }
+      : workTypes.includes('asbestos')
+        ? { text: '✗ אין היתר', bg: '#FDECEC', color: '#CC0000' }
+        : { text: 'לא נדרש', bg: '#EEE', color: '#777' }
+    return (
+      <Card title="סטטוס לשטח" tone="green">
+        <ReadRow label="תאריך ביצוע מתוכנן" value={p.execution_date ? fmtDay(p.execution_date) : '—'} />
+        <ReadRow label="ראש צוות" value={p.team_lead || '—'} />
+        <ReadRow label="כתובת" value={address || '—'} />
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '9px 4px', direction: 'rtl', borderTop: `1px solid #f3efe9` }}>
+          <span style={{ fontSize: 13, fontWeight: 700, color: '#555' }}>סטטוס היתר</span>
+          <span style={{ background: permit.bg, color: permit.color, borderRadius: 14, padding: '3px 12px', fontSize: 13, fontWeight: 800 }}>{permit.text}</span>
+        </div>
+      </Card>
+    )
+  }
+
+  // ── תצוגה מלאה (admin/manager/office) ──
   const setPermit = (patch: Partial<AsbestosPermit>) => onChange({ asbestos_permit: { ...p.asbestos_permit, ...patch } })
   function setSupplier(i: number, val: string) {
     const next = p.suppliers.map((s, j) => j === i ? val : s)
@@ -1054,6 +1228,12 @@ function ProgressTab({ progress, workTypes, onChange, others, setOther }: {
 
   return (
     <>
+      {/* כרטיס שלב העסקה — רק אם קיימת רשומת deal תואמת ל-order_number */}
+      {deal && <StageCard deal={deal} onStageChange={onStageChange} />}
+      {dealLoading && !deal && (
+        <div style={{ margin: '6px 8px', padding: '8px 12px', fontSize: 12, color: '#999', direction: 'rtl' }}>טוען נתוני עסקה…</div>
+      )}
+
       {workTypes.includes('asbestos') && (
         <Card title="היתר משרד הסביבה" tone="blue">
           <div style={grid2}>
@@ -1069,6 +1249,16 @@ function ProgressTab({ progress, workTypes, onChange, others, setOther }: {
       )}
 
       <Card title="ספקים" tone="blue">
+        {/* חומר קירוי — ספק + תאריך הזמנה עצמאיים (מבלוק roofReplace), לא תלויים בתאריך הגלובלי */}
+        {roofActive && (
+          <div style={{ marginBottom: 10, paddingBottom: 10, borderBottom: `1px solid ${BORDER}` }}>
+            <div style={{ fontSize: 11, fontWeight: 800, color: '#1A5A2A', marginBottom: 6, direction: 'rtl' }}>🏠 חומר קירוי — ספק ותאריך משלו</div>
+            <div style={grid2}>
+              <Field label="ספק קירוי"><PSelect value={roofSupplier} options={ROOFING_SUPPLIERS} emptyLabel="— ספק קירוי —" accent="#1A5A2A" onChange={onRoofSupplier} /></Field>
+              <Field label="תאריך הזמנה"><TextInput type="date" value={roofOrderDate} onChange={onRoofOrderDate} /></Field>
+            </div>
+          </div>
+        )}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 10 }}>
           {p.suppliers.map((s, i) => (
             <PSelect key={i} value={s} options={i % 3 === 0 ? ROOFING_SUPPLIERS : ALL_SUPPLIERS}
@@ -1101,6 +1291,10 @@ function ProgressTab({ progress, workTypes, onChange, others, setOther }: {
           {blockers.length === 0 && <SummaryLine icon="🟢" text="מוכן לביצוע" bg="#E8F5E9" />}
         </div>
       </Card>
+
+      {/* כרטיסי כספים + גביה — רק אם קיימת רשומת deal תואמת */}
+      {deal && <FinancesCard deal={deal} />}
+      {deal && <CollectionCard deal={deal} />}
     </>
   )
 }
@@ -1123,6 +1317,15 @@ export default function NewExecutionSheet() {
   const [notesOpen, setNotesOpen] = useState<Set<string>>(new Set())
   const [form, setForm] = useState<SheetForm>(emptyForm())
 
+  // ── טאב עסקה (deals) ──────────────────────────────────────────
+  // תצוגה מלאה = admin/manager/office (איציק, אסף, מוטי, משרד). שטח/קבלן משנה
+  // (field/field_worker/external, וכן פרופיל שטרם נטען) → תצוגת שטח מצומצמת בלבד.
+  const role = profile?.role
+  const isFullView = role === 'admin' || role === 'manager' || role === 'office'
+  const [deal, setDeal] = useState<DealRow | null>(null)
+  const [dealLoading, setDealLoading] = useState(false)
+  const dealFetchedFor = useRef<string | null>(null)
+
   const sheetIdRef = useRef<string | null>(null)
   const latest = useRef(form); latest.current = form
   const savingRef = useRef(false)
@@ -1136,6 +1339,51 @@ export default function NewExecutionSheet() {
   const patchLogistics = (p: Partial<Logistics>) => setForm(f => ({ ...f, logistics: { ...f.logistics, ...p } }))
   const patchBlocks = (p: Partial<WorkBlocks>) => setForm(f => ({ ...f, blocks: { ...f.blocks, ...p } }))
   const patchProgress = (p: Partial<ProgressData>) => setForm(f => ({ ...f, progress: { ...f.progress, ...p } }))
+  const setRoof = (p: Partial<RoofReplaceBlock>) => setForm(f => ({ ...f, blocks: { ...f.blocks, roofReplace: { ...f.blocks.roofReplace, ...p } } }))
+
+  // שליפת רשומת deal לפי order_number — רק בתצוגה מלאה, רק כשטאב העסקה פתוח.
+  // אין match = מצב תקין (עדיין לא הוזן ל-deals), לא שגיאה. קשר 1-לרבים: כמה
+  // דפי ביצוע יכולים לחלוק order_number אחד, ולכן limit(1) על ההזמנה.
+  useEffect(() => {
+    if (!isFullView || tab !== 'progress') return
+    const on = form.details.orderNumber.trim()
+    if (!on) { setDeal(null); dealFetchedFor.current = null; return }
+    if (dealFetchedFor.current === on) return
+    dealFetchedFor.current = on
+    let cancelled = false
+    setDealLoading(true)
+    ;(async () => {
+      try {
+        const rows = await queryWithRetry<DealRow[]>(() =>
+          supabase.from('deals').select('*').eq('order_number', on).limit(1))
+        if (!cancelled) setDeal((rows?.[0] as DealRow) ?? null)
+      } catch (e) {
+        console.error('[deal] load failed after retries:', e)
+        if (!cancelled) setDeal(null)   // כשל שליפה → נופלים חזרה לכרטיסים הקיימים בלבד
+      } finally {
+        if (!cancelled) setDealLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [isFullView, tab, form.details.orderNumber])
+
+  // עדכון שלב העסקה — אופטימי מיידי + כתיבה ל-deals; חזרה אחורה על כשל.
+  async function handleStageChange(newStage: number) {
+    if (!deal) return
+    const prev = deal
+    const stamp = new Date().toISOString()
+    const by = profile?.full_name ?? ''
+    setDeal({ ...deal, stage: newStage, stage_updated_at: stamp, stage_updated_by: by })
+    const { error } = await supabase.from('deals')
+      .update({ stage: newStage, stage_updated_at: stamp, stage_updated_by: by })
+      .eq('id', deal.id)
+    if (error) {
+      console.error('[deal] stage update failed:', error)
+      setDeal(prev)
+      setFlash('עדכון השלב נכשל — נסה שוב')
+      setTimeout(() => setFlash(null), 2500)
+    }
+  }
   const setNote = (k: string, v: string) => setForm(f => ({ ...f, notes: { ...f.notes, [k]: v } }))
   const setOther = (k: string, v: string) => setForm(f => ({ ...f, others: { ...f.others, [k]: v } }))
   const toggleNote = (k: string) => setNotesOpen(prev => { const n = new Set(prev); n.has(k) ? n.delete(k) : n.add(k); return n })
@@ -1585,7 +1833,17 @@ export default function NewExecutionSheet() {
 
         {/* ══ לשונית התקדמות ══ */}
         {tab === 'progress' && (
-          <ProgressTab progress={form.progress} workTypes={form.workTypes} onChange={patchProgress} others={form.others} setOther={setOther} />
+          <ProgressTab
+            progress={form.progress} workTypes={form.workTypes} onChange={patchProgress}
+            others={form.others} setOther={setOther}
+            isFull={isFullView} address={form.details.address}
+            deal={deal} dealLoading={dealLoading} onStageChange={handleStageChange}
+            roofActive={form.workTypes.includes('roofReplace')}
+            roofSupplier={form.blocks.roofReplace.supplier ?? ''}
+            roofOrderDate={form.blocks.roofReplace.orderDate ?? ''}
+            onRoofSupplier={v => setRoof({ supplier: v })}
+            onRoofOrderDate={v => setRoof({ orderDate: v })}
+          />
         )}
       </div>
 
