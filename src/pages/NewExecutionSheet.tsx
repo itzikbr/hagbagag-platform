@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { queryWithRetry } from '../lib/dbRetry'
-import { useAuth } from '../hooks/useAuth'
+import { useAuth, useIsAdmin } from '../hooks/useAuth'
 import MaterialsTab, { type SmartMaterials, emptySmartMaterials, normalizeSmartMaterials } from './MaterialsTab'
 
 // ══════════════════════════════════════════════════════════════
@@ -1319,9 +1319,13 @@ export default function NewExecutionSheet() {
 
   // ── טאב עסקה (deals) ──────────────────────────────────────────
   // תצוגה מלאה = admin/manager/office (איציק, אסף, מוטי, משרד). שטח/קבלן משנה
-  // (field/field_worker/external, וכן פרופיל שטרם נטען) → תצוגת שטח מצומצמת בלבד.
+  // (field/field_worker/external) → תצוגת שטח מצומצמת בלבד.
+  // ⚠️ זיהוי האדמין מבוסס-אימייל (useIsAdmin) ולא רק על profile.role — כי profile
+  // עלול להיות null כששליפתו נכשלה/מתעכבה (ראה useAuth), ואז אדמין היה נופל בטעות
+  // לתצוגת השטח. שאר התפקידים (manager/office) נקבעים לפי profile.role כרגיל.
+  const isAdmin = useIsAdmin()
   const role = profile?.role
-  const isFullView = role === 'admin' || role === 'manager' || role === 'office'
+  const isFullView = isAdmin || role === 'admin' || role === 'manager' || role === 'office'
   const [deal, setDeal] = useState<DealRow | null>(null)
   const [dealLoading, setDealLoading] = useState(false)
   const dealFetchedFor = useRef<string | null>(null)
