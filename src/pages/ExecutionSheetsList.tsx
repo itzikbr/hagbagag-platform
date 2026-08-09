@@ -110,6 +110,7 @@ export default function ExecutionSheetsList() {
   const loadedOnce = useRef(false)
   const aliveRef = useRef(true)
   const initialDoneRef = useRef(false)
+  const loadStartRef = useRef<number | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
   const sentinelRef = useRef<HTMLDivElement>(null)
   const [visible, setVisible] = useState(20)   // רינדור מדורג — 20 ראשונים ואז +20 בגלילה
@@ -131,8 +132,14 @@ export default function ExecutionSheetsList() {
       .subscribe()
 
     // רענון בכל חזרה למסך (PWA/טאב/bfcache) — רק אחרי הטעינה הראשונית.
+    // אם הטעינה הראשונית עדיין תקועה כשחוזרים לחזית — ה-fetch וטיימר ה-timeout
+    // כנראה קפאו יחד ברקע (iOS), כך שהריטריי הפנימי לא הופעל כלל. אחרי סף זמן
+    // סביר מתחילים ניסיון טרי (seq חדש), ומתעלמים מהתוצאה של הניסיון הישן כשתגיע.
+    const STUCK_MS = 6000
     const refreshOnReturn = () => {
-      if (initialDoneRef.current && document.visibilityState === 'visible') loadSheets({ background: true })
+      if (document.visibilityState !== 'visible') return
+      if (initialDoneRef.current) { loadSheets({ background: true }); return }
+      if (loadStartRef.current && Date.now() - loadStartRef.current > STUCK_MS) loadSheets()
     }
     document.addEventListener('visibilitychange', refreshOnReturn)
     window.addEventListener('focus', refreshOnReturn)
@@ -168,7 +175,7 @@ export default function ExecutionSheetsList() {
 
   async function loadSheets({ background = false }: { background?: boolean } = {}) {
     const seq = ++reqSeq.current
-    if (!background) { setLoading(true); setError(null) }
+    if (!background) { setLoading(true); setError(null); loadStartRef.current = Date.now() }
 
     // beacon בתחילת טעינת foreground — כדי לראות שהטעינה בכלל מתחילה במכשיר
     if (!background) reportClient({ where: 'sheets-load-start', online: navigator.onLine, ua: navigator.userAgent.slice(0, 60) })
@@ -208,7 +215,12 @@ export default function ExecutionSheetsList() {
       }
     } finally {
       // תמיד מכבים את הספינר בסיום ניסיון foreground — כדי שלא נתקע לנצח על "טוען…".
-      if (aliveRef.current && !background) { setLoading(false); initialDoneRef.current = true }
+      // seq === reqSeq.current מוודא שרק הניסיון האחרון שיצא לדרך שולט בספינר —
+      // ניסיון ישן שנקפא ברקע ומגיע באיחור (אחרי שניסיון טרי כבר יצא לדרך) לא
+      // יכבה בטעות ספינר של ניסיון חדש שעדיין רץ.
+      if (aliveRef.current && !background && seq === reqSeq.current) {
+        setLoading(false); initialDoneRef.current = true; loadStartRef.current = null
+      }
     }
   }
 
