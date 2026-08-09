@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { queryWithRetry } from '../lib/dbRetry'
+import { matchDeals, decide, normalizeOrderNumber, type MatchDecision } from '../lib/dealMatching'
 import { useAuth, useIsAdmin } from '../hooks/useAuth'
 import MaterialsTab, { type SmartMaterials, emptySmartMaterials, normalizeSmartMaterials } from './MaterialsTab'
 
@@ -75,7 +76,9 @@ const DEAL_STAGES = ['טיוטא', 'מאושרת זמני', 'מאושרת לבי
 interface DealRow {
   id: string
   order_number: string
+  customer_number: string | null
   customer_name: string | null
+  raw_data: { site?: string; contact?: string } | null
   total_price: number | null
   price_before_vat: number | null
   materials_cost: number | null; labor_cost: number | null; logistics_cost: number | null
@@ -1181,11 +1184,11 @@ function CollectionCard({ deal }: { deal: DealRow }) {
   )
 }
 
-function ProgressTab({ progress, workTypes, onChange, others, setOther, isFull, address, deal, dealLoading, onStageChange, roofActive, roofSupplier, roofOrderDate, onRoofSupplier, onRoofOrderDate }: {
+function ProgressTab({ progress, workTypes, onChange, others, setOther, isFull, address, deal, dealLoading, dealMatchStatus, onStageChange, roofActive, roofSupplier, roofOrderDate, onRoofSupplier, onRoofOrderDate }: {
   progress: ProgressData; workTypes: string[]; onChange: (p: Partial<ProgressData>) => void
   others: Record<string, string>; setOther: (k: string, v: string) => void
   isFull: boolean; address: string
-  deal: DealRow | null; dealLoading: boolean; onStageChange: (stage: number) => void
+  deal: DealRow | null; dealLoading: boolean; dealMatchStatus: MatchDecision | null; onStageChange: (stage: number) => void
   roofActive: boolean; roofSupplier: string; roofOrderDate: string
   onRoofSupplier: (v: string) => void; onRoofOrderDate: (v: string) => void
 }) {
@@ -1232,6 +1235,11 @@ function ProgressTab({ progress, workTypes, onChange, others, setOther, isFull, 
       {deal && <StageCard deal={deal} onStageChange={onStageChange} />}
       {dealLoading && !deal && (
         <div style={{ margin: '6px 8px', padding: '8px 12px', fontSize: 12, color: '#999', direction: 'rtl' }}>טוען נתוני עסקה…</div>
+      )}
+      {!dealLoading && !deal && dealMatchStatus === 'ambiguous' && (
+        <div style={{ margin: '6px 8px', padding: '10px 12px', fontSize: 13, fontWeight: 600, color: '#8A6D00', background: '#FFF8E1', border: '1px solid #F0DFA0', borderRadius: 8, direction: 'rtl' }}>
+          ⚠️ לא נמצאה התאמה חד-משמעית לעסקה — יש לבדוק ידנית מול מספר ההזמנה/שם הלקוח.
+        </div>
       )}
 
       {workTypes.includes('asbestos') && (
@@ -1328,6 +1336,7 @@ export default function NewExecutionSheet() {
   const isFullView = isAdmin || role === 'admin' || role === 'manager' || role === 'office'
   const [deal, setDeal] = useState<DealRow | null>(null)
   const [dealLoading, setDealLoading] = useState(false)
+  const [dealMatchStatus, setDealMatchStatus] = useState<MatchDecision | null>(null)
   const dealFetchedFor = useRef<string | null>(null)
 
   const sheetIdRef = useRef<string | null>(null)
@@ -1345,31 +1354,44 @@ export default function NewExecutionSheet() {
   const patchProgress = (p: Partial<ProgressData>) => setForm(f => ({ ...f, progress: { ...f.progress, ...p } }))
   const setRoof = (p: Partial<RoofReplaceBlock>) => setForm(f => ({ ...f, blocks: { ...f.blocks, roofReplace: { ...f.blocks.roofReplace, ...p } } }))
 
-  // שליפת רשומת deal לפי order_number — רק בתצוגה מלאה, רק כשטאב העסקה פתוח.
-  // אין match = מצב תקין (עדיין לא הוזן ל-deals), לא שגיאה. קשר 1-לרבים: כמה
-  // דפי ביצוע יכולים לחלוק order_number אחד, ולכן limit(1) על ההזמנה.
+  // שליפת רשומת deal — לא .eq מדויק על מספר ההזמנה הגולמי, אלא התאמה לפי מפתח
+  // קנוני + סימנים משניים (ראו src/lib/dealMatching.ts): מספר ההזמנה בטופס
+  // ("92/26") ובפריוריטי ("SO26000092") הם שני פורמטים לאותה הזמנה. שולפים את
+  // כל שורות deals (טבלה קטנה — עשרות שורות) ומתאימים ב-JS. אין match ברור
+  // (0 מועמדים, או פחות משני סימנים חופפים על מועמד יחיד) = לא מנחשים —
+  // 'ambiguous'/'none', לא שגיאה.
   useEffect(() => {
     if (!isFullView || tab !== 'progress') return
     const on = form.details.orderNumber.trim()
-    if (!on) { setDeal(null); dealFetchedFor.current = null; return }
+    if (!on) { setDeal(null); setDealMatchStatus(null); dealFetchedFor.current = null; return }
     if (dealFetchedFor.current === on) return
     dealFetchedFor.current = on
     let cancelled = false
     setDealLoading(true)
     ;(async () => {
       try {
-        const rows = await queryWithRetry<DealRow[]>(() =>
-          supabase.from('deals').select('*').eq('order_number', on).limit(1))
-        if (!cancelled) setDeal((rows?.[0] as DealRow) ?? null)
+        const rows = await queryWithRetry<DealRow[]>(() => supabase.from('deals').select('*'))
+        const candidates = matchDeals(
+          { projectName: form.details.customerName, address: form.details.address, customerName: form.details.customerName, rawOrderNumber: on },
+          rows ?? [],
+        )
+        // מספר הזמנה גולמי שהוקלד אך לא תואם לשום תבנית מוכרת (לא SO<YY><ספרות>
+        // ולא <ספרות>/<YY>) הוא בעצמו סימן לבדיקה ידנית — לא "עוד לא הוזן ל-deals".
+        const status = !normalizeOrderNumber(on) && decide(candidates) === 'none' ? 'ambiguous' : decide(candidates)
+        if (!cancelled) {
+          setDealMatchStatus(status)
+          const winnerId = status === 'confident' ? candidates[0].deal.id : null
+          setDeal(winnerId ? (rows ?? []).find(r => r.id === winnerId) ?? null : null)
+        }
       } catch (e) {
         console.error('[deal] load failed after retries:', e)
-        if (!cancelled) setDeal(null)   // כשל שליפה → נופלים חזרה לכרטיסים הקיימים בלבד
+        if (!cancelled) { setDeal(null); setDealMatchStatus(null) }   // כשל שליפה → נופלים חזרה לכרטיסים הקיימים בלבד
       } finally {
         if (!cancelled) setDealLoading(false)
       }
     })()
     return () => { cancelled = true }
-  }, [isFullView, tab, form.details.orderNumber])
+  }, [isFullView, tab, form.details.orderNumber, form.details.customerName, form.details.address])
 
   // עדכון שלב העסקה — אופטימי מיידי + כתיבה ל-deals; חזרה אחורה על כשל.
   async function handleStageChange(newStage: number) {
@@ -1841,7 +1863,7 @@ export default function NewExecutionSheet() {
             progress={form.progress} workTypes={form.workTypes} onChange={patchProgress}
             others={form.others} setOther={setOther}
             isFull={isFullView} address={form.details.address}
-            deal={deal} dealLoading={dealLoading} onStageChange={handleStageChange}
+            deal={deal} dealLoading={dealLoading} dealMatchStatus={dealMatchStatus} onStageChange={handleStageChange}
             roofActive={form.workTypes.includes('roofReplace')}
             roofSupplier={form.blocks.roofReplace.supplier ?? ''}
             roofOrderDate={form.blocks.roofReplace.orderDate ?? ''}
