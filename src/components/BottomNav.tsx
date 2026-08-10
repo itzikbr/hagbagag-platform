@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { useIsAdmin, useAuth } from '../hooks/useAuth'
 import { reportClient } from '../lib/report'
 
-type Tab = 'chats' | 'sheets' | 'more' | 'itzik' | 'gemini'
+type Tab = 'chats' | 'sheets' | 'more' | 'itzik' | 'gemini' | 'deals'
 
 // hash הבנדל שנטען בפועל במכשיר — נשלף מ-<script src="/assets/index-<hash>.js">.
 // מזהה חד-משמעית איזו גרסה רצה על המכשיר (ישן/חדש) לצורך אבחון.
@@ -32,8 +32,9 @@ export default function BottomNav({ activeTab, onTabChange }: BottomNavProps) {
   const isSheets = location.pathname === '/sheets'
   const isItzik = location.pathname === '/itzik'
   const isGemini = location.pathname === '/gemini'
+  const isDeals = location.pathname === '/deals'
 
-  // הטאבים האישיים (⚡ ו-✨) מוצגים רק לאדמין
+  // הטאבים האישיים (⚡, ✨ ו-📊) מוצגים רק לאדמין
   const showItzik = isAdmin
 
   const tabs = [
@@ -96,6 +97,19 @@ export default function BottomNav({ activeTab, onTabChange }: BottomNavProps) {
       ),
       path: '/gemini',
     }] : []),
+    ...(showItzik ? [{
+      id: 'deals' as const,
+      label: '',
+      // 📊 כ-SVG חד-צבעי (עמודות) עם fill לפי מצב פעיל
+      icon: (active: boolean) => (
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+          <rect x="4" y="12" width="4" height="8" rx="1" fill={active ? '#CC0000' : '#555555'}/>
+          <rect x="10" y="7" width="4" height="13" rx="1" fill={active ? '#CC0000' : '#555555'}/>
+          <rect x="16" y="3" width="4" height="17" rx="1" fill={active ? '#CC0000' : '#555555'}/>
+        </svg>
+      ),
+      path: '/deals',
+    }] : []),
   ]
 
   // אבחון: מדווח פעם אחת בעליית הניווט מה בדיוק רונדר במכשיר הזה — רשימת הטאבים,
@@ -129,6 +143,7 @@ export default function BottomNav({ activeTab, onTabChange }: BottomNavProps) {
           : tab.id === 'sheets' ? isSheets
           : tab.id === 'itzik' ? isItzik
           : tab.id === 'gemini' ? isGemini
+          : tab.id === 'deals' ? isDeals
           : activeTab === 'more'
         return (
           <button

@@ -19,6 +19,7 @@ import LightningScreen from './pages/LightningScreen'
 import GeminiChat from './pages/GeminiChat'
 import MaterialsAdmin from './pages/MaterialsAdmin'
 import GroupsAdmin from './pages/GroupsAdmin'
+import DealsDashboard from './pages/DealsDashboard'
 import BottomNav from './components/BottomNav'
 import HubButton from './components/HubButton'
 import ErrorBoundary from './components/ErrorBoundary'
@@ -53,7 +54,7 @@ function RequireAdmin({ children }: { children: React.ReactNode }) {
 }
 
 function PlatformLayout() {
-  const [activeTab, setActiveTab] = useState<'chats' | 'sheets' | 'more' | 'itzik' | 'gemini'>('chats')
+  const [activeTab, setActiveTab] = useState<'chats' | 'sheets' | 'more' | 'itzik' | 'gemini' | 'deals'>('chats')
   const location = useLocation()
   const isAdmin = useIsAdmin()
   // הניווט התחתון מוצג לכל המשתמשים (שיחות + דפי ביצוע). מוסתר רק במסכי-משנה
@@ -87,6 +88,7 @@ function PlatformLayout() {
           <Route path="/admin/users"     element={<RequireAdmin><Admin /></RequireAdmin>} />
           <Route path="/admin/materials" element={<RequireAdmin><MaterialsAdmin /></RequireAdmin>} />
           <Route path="/admin/groups"    element={<RequireAdmin><GroupsAdmin /></RequireAdmin>} />
+          <Route path="/deals"     element={<RequireAdmin><DealsDashboard /></RequireAdmin>} />
           <Route path="/itzik"     element={<RequireAdmin><LightningScreen /></RequireAdmin>} />
           <Route path="/gemini"    element={<RequireAdmin><GeminiChat /></RequireAdmin>} />
           <Route path="*"          element={<Navigate to="/sheets" replace />} />
