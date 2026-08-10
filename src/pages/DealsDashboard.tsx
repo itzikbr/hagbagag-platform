@@ -17,6 +17,7 @@ const BORDER = '#E5DDD5'
 interface DealRow {
   id: string
   order_number: string
+  customer_number: string | null
   customer_name: string | null
   total_price: number | null
   stage: number
@@ -161,6 +162,17 @@ export default function DealsDashboard() {
     return { count: closed.length, sum: closed.reduce((s, d) => s + (d.total_price ?? 0), 0), top: sorted.slice(0, HISTORY_TOP_N) }
   }, [deals])
 
+  // כמה עסקאות פתוחות (stage≠7) יש לכל customer_number — לתצוגת "יתרה משוערת"
+  // בלבד (ראו BalanceRow). לא נכתב לשום מקום ב-DB.
+  const openCountByCustomer = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const d of deals) {
+      if (d.stage === HISTORY_STAGE || !d.customer_number) continue
+      m.set(d.customer_number, (m.get(d.customer_number) ?? 0) + 1)
+    }
+    return m
+  }, [deals])
+
   function onPipelineClick(stage: number) {
     if (stage === HISTORY_STAGE) {
       setHistoryOpen(true)
@@ -232,7 +244,7 @@ export default function DealsDashboard() {
               {visibleRows.length === 0 && (
                 <div style={{ padding: 32, textAlign: 'center', color: GREY, fontSize: 14 }}>אין עסקאות בסינון הזה</div>
               )}
-              {visibleRows.map(d => <DealCard key={d.id} deal={d} linkedCount={linkCounts.get(d.order_number) ?? 0} />)}
+              {visibleRows.map(d => <DealCard key={d.id} deal={d} linkedCount={linkCounts.get(d.order_number) ?? 0} openCountForCustomer={d.customer_number ? openCountByCustomer.get(d.customer_number) ?? 0 : 0} />)}
             </div>
 
             {/* היסטוריה — סגורות, מקופל בברירת מחדל */}
@@ -252,7 +264,7 @@ export default function DealsDashboard() {
                   <div style={{ fontSize: 11.5, color: GREY, padding: '10px 6px 4px', direction: 'rtl' }}>
                     {HISTORY_TOP_N} הגדולות מתוך {historyDeals.count} — לא נטען הכל, כדי לא להעמיס בשוטף.
                   </div>
-                  {historyDeals.top.map(d => <DealCard key={d.id} deal={d} linkedCount={linkCounts.get(d.order_number) ?? 0} />)}
+                  {historyDeals.top.map(d => <DealCard key={d.id} deal={d} linkedCount={linkCounts.get(d.order_number) ?? 0} openCountForCustomer={d.customer_number ? openCountByCustomer.get(d.customer_number) ?? 0 : 0} />)}
                 </div>
               )}
             </div>
@@ -279,10 +291,22 @@ function Chip({ label, count, sum, active, color, onClick }: { label: string; co
   )
 }
 
-function DealCard({ deal, linkedCount }: { deal: DealRow; linkedCount: number }) {
+// "נותר לתשלום" — תצוגה בלבד, לא נכתב חזרה ל-DB:
+// balance_due מאומת (לא NULL) → מוצג כמו שהוא, בלי תווית "משוער".
+// balance_due=NULL → total_price של העסקה עצמה כהערכה: אזהרה חלשה (יתרה
+// משוערת) כברירת מחדל, או אזהרה חזקה אם ללקוח (customer_number) יש עוד
+// עסקאות פתוחות — כי אז אין דרך לדעת כמה מהיתרה שייך לעסקה הזו בפרט.
+function balanceInfo(deal: DealRow, openCountForCustomer: number): { value: number | null; verified: boolean; warnStrong: boolean } {
+  if (deal.balance_due != null) return { value: deal.balance_due, verified: true, warnStrong: false }
+  if (deal.total_price == null) return { value: null, verified: false, warnStrong: false }
+  return { value: deal.total_price, verified: false, warnStrong: openCountForCustomer > 1 }
+}
+
+function DealCard({ deal, linkedCount, openCountForCustomer }: { deal: DealRow; linkedCount: number; openCountForCustomer: number }) {
   const meta = STAGE_META[deal.stage] ?? STAGE_META[1]
   const profitPct = deal.raw_data?.profit_pct
   const tone = profitPct != null ? profitTone(profitPct) : null
+  const bal = balanceInfo(deal, openCountForCustomer)
   return (
     <div style={{ background: '#fff', borderRadius: 12, border: `1px solid ${BORDER}`, padding: '12px 14px', marginBottom: 8, direction: 'rtl' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
@@ -309,12 +333,23 @@ function DealCard({ deal, linkedCount }: { deal: DealRow; linkedCount: number })
         )}
       </div>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 8, paddingTop: 8, borderTop: `1px dashed ${BORDER}` }}>
-        <span style={{ fontSize: 12.5, fontWeight: 600, color: '#555' }}>נותר לתשלום</span>
-        {deal.balance_due != null ? (
-          <span style={{ fontSize: 14, fontWeight: 800, color: '#111' }}>{ils(deal.balance_due)}</span>
-        ) : (
-          <span style={{ fontSize: 12.5, fontWeight: 600, color: GREY }}>לא זמין עדיין (ממתין לגיול חובות)</span>
+      <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px dashed ${BORDER}` }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+          <span style={{ fontSize: 12.5, fontWeight: 600, color: '#555' }}>נותר לתשלום</span>
+          {bal.value != null ? (
+            <span style={{ fontSize: 14, fontWeight: 800, color: bal.verified ? '#111' : (bal.warnStrong ? '#B5651D' : '#8A6D00') }}>{ils(bal.value)}</span>
+          ) : (
+            <span style={{ fontSize: 12.5, fontWeight: 600, color: GREY }}>לא זמין (אין total_price)</span>
+          )}
+        </div>
+        {!bal.verified && bal.value != null && (
+          bal.warnStrong ? (
+            <div style={{ fontSize: 11.5, fontWeight: 700, color: '#8A4B00', background: '#FFF1DB', border: '1px solid #F0C98C', borderRadius: 6, padding: '4px 8px', marginTop: 6 }}>
+              ⚠️ יתרה משוערת — ללקוח זה יש כמה עסקאות פתוחות, לא ניתן לפצל בין הזמנות
+            </div>
+          ) : (
+            <div style={{ fontSize: 11, fontWeight: 600, color: '#8A6D00', marginTop: 3 }}>יתרה משוערת (טרם אומת)</div>
+          )
         )}
       </div>
       {deal.balance_note && (
