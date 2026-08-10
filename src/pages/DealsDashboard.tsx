@@ -46,6 +46,13 @@ function ils(n: number | null | undefined): string {
   if (n == null || isNaN(Number(n))) return ''
   return '₪' + Number(n).toLocaleString('he-IL')
 }
+// סכום מקוצר לצ'יפים (K/M) — לא לכרטיסים, שם נשאר הסכום המלא (ils).
+function ilsCompact(n: number): string {
+  const abs = Math.abs(n)
+  if (abs >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M ₪'
+  if (abs >= 1_000) return Math.round(n / 1_000) + 'K ₪'
+  return ils(n)
+}
 function profitTone(pct: number): { bg: string; color: string } {
   if (pct < 20) return { bg: '#FDECEC', color: RED }
   if (pct < 35) return { bg: '#FFF1E0', color: '#B5651D' }
@@ -211,10 +218,10 @@ export default function DealsDashboard() {
 
             {/* צ'יפים */}
             <div style={{ display: 'flex', gap: 8, padding: '10px 12px', overflowX: 'auto', background: '#fff', borderTop: `1px solid ${BORDER}` }} className="no-scrollbar">
-              <Chip label="הכל הפעיל" count={deals.filter(d => d.stage !== HISTORY_STAGE).length}
+              <Chip label="הכל הפעיל" count={deals.filter(d => d.stage !== HISTORY_STAGE).length} sum={totalActive}
                 active={selectedStage == null} color={RED} onClick={() => setSelectedStage(null)} />
               {CHIP_STAGES.map(stage => (
-                <Chip key={stage} label={STAGE_META[stage].label} count={perStage.get(stage)?.count ?? 0}
+                <Chip key={stage} label={STAGE_META[stage].label} count={perStage.get(stage)?.count ?? 0} sum={perStage.get(stage)?.sum ?? 0}
                   active={selectedStage === stage} color={STAGE_META[stage].bg}
                   onClick={() => setSelectedStage(cur => (cur === stage ? null : stage))} />
               ))}
@@ -256,18 +263,18 @@ export default function DealsDashboard() {
   )
 }
 
-function Chip({ label, count, active, color, onClick }: { label: string; count: number; active: boolean; color: string; onClick: () => void }) {
+function Chip({ label, count, sum, active, color, onClick }: { label: string; count: number; sum: number; active: boolean; color: string; onClick: () => void }) {
   return (
     <button type="button" onClick={onClick} style={{
-      flexShrink: 0, display: 'flex', alignItems: 'center', gap: 6, padding: '7px 13px', borderRadius: 18,
+      flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, padding: '7px 13px', borderRadius: 14,
       border: `1.5px solid ${active ? color : BORDER}`, background: active ? color : '#fff',
-      color: active ? '#fff' : '#333', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap',
+      color: active ? '#fff' : '#333', cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap',
     }}>
-      {label}
+      <span style={{ fontSize: 13, fontWeight: 700 }}>{label}</span>
       <span style={{
-        background: active ? 'rgba(255,255,255,0.3)' : CREAM, color: active ? '#fff' : '#666',
-        borderRadius: 10, padding: '1px 7px', fontSize: 11.5, fontVariantNumeric: 'tabular-nums',
-      }}>{count}</span>
+        fontSize: 11.5, fontWeight: 700, fontVariantNumeric: 'tabular-nums',
+        color: active ? 'rgba(255,255,255,0.9)' : '#777',
+      }}>{count} · {ilsCompact(sum)}</span>
     </button>
   )
 }
