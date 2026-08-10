@@ -20,9 +20,10 @@ export interface DealRow {
 
 export interface MatchCandidate {
   deal: DealRow
-  score: number   // 0, 0.3, 0.7 או 1 — ראו matchDeals
+  score: number
   orderNumberMatch: boolean
-  nameOrAddressMatch: boolean
+  identityMatch: boolean    // שם/זהות המשלם — סימן חזק (ראו matchDeals)
+  siteOnlyMatch: boolean    // כתובת/יישוב מול site בלבד — סימן חלש, לא מספיק לביטחון
   reasons: string[]
 }
 
@@ -58,20 +59,29 @@ export function matchDeals(sheet: SheetMatchInput, deals: DealRow[]): MatchCandi
       const orderNumberMatch = !!sheetOrder && !!dealOrder &&
         sheetOrder.year === dealOrder.year && sheetOrder.serial === dealOrder.serial
 
-      const nameOrAddressMatch =
+      // זהות המשלם (סימן חזק): שם/כינוי בטופס מול שם הלקוח או איש הקשר של ה-deal,
+      // וגם כתובת מול שם הלקוח — כי כשה-deal של יישוב/קיבוץ עצמו, customer_name
+      // *הוא* שם היישוב (המשלם הוא היישוב עצמו). זה סימן ספציפי למשלם, לא רק למקום.
+      const identityMatch =
         textOverlap(sheet.projectName, deal.customer_name) ||
         textOverlap(sheet.projectName, deal.raw_data?.contact) ||
         textOverlap(sheet.customerName, deal.customer_name) ||
-        textOverlap(sheet.address, deal.raw_data?.site) ||
+        textOverlap(sheet.customerName, deal.raw_data?.contact) ||
         textOverlap(sheet.address, deal.customer_name)
+
+      // כתובת/יישוב מול site *בלבד* — סימן חלש בכוונה: site הוא תיאור מיקום
+      // עבודה, לא זהות משלם. באותו יישוב יכולות להתקיים כמה הזמנות שונות עם
+      // משלמים שונים (הקיבוץ עצמו + כמה משפחות פרטיות בנפרד) — חפיפת site
+      // לא מבחינה ביניהן, ולכן לא נחשבת ל"חזק" גם בשילוב עם מספר הזמנה תואם.
+      const siteOnlyMatch = !identityMatch && textOverlap(sheet.address, deal.raw_data?.site)
 
       const reasons: string[] = []
       if (orderNumberMatch) reasons.push(`מספר הזמנה מנורמל תואם (${sheetOrder!.serial}/${sheetOrder!.year})`)
-      if (nameOrAddressMatch) reasons.push('שם/כתובת חופפים')
+      if (identityMatch) reasons.push('שם/זהות משלם חופפים')
+      if (siteOnlyMatch) reasons.push('כתובת/יישוב חופפים מול site בלבד (סימן חלש — לא מספיק לביטחון)')
 
-      // מספר הזמנה = סימן חזק (0.7), שם/כתובת = סימן משני (0.3) — משלימים זה את זה.
-      const score = (orderNumberMatch ? 0.7 : 0) + (nameOrAddressMatch ? 0.3 : 0)
-      return { deal, score, orderNumberMatch, nameOrAddressMatch, reasons }
+      const score = (orderNumberMatch ? 0.7 : 0) + (identityMatch ? 0.3 : 0) + (siteOnlyMatch ? 0.15 : 0)
+      return { deal, score, orderNumberMatch, identityMatch, siteOnlyMatch, reasons }
     })
     .filter(c => c.score > 0)
     .sort((a, b) => b.score - a.score)
@@ -79,11 +89,14 @@ export function matchDeals(sheet: SheetMatchInput, deals: DealRow[]): MatchCandi
 
 export type MatchDecision = 'confident' | 'ambiguous' | 'none'
 
-// כתיבה אוטומטית מותרת רק כש-candidate יחיד תואם בשני הסימנים גם יחד
-// (מספר הזמנה מנורמל + שם/כתובת). כל מקרה אחר — 0 מועמדים, כמה מועמדים,
-// או מועמד יחיד עם סימן אחד בלבד — 'ambiguous': לא כותבים, לא מנחשים.
+// כתיבה אוטומטית מותרת רק כש-candidate יחיד תואם מספר הזמנה מנורמל + זהות
+// משלם (identityMatch) גם יחד. חפיפת כתובת/יישוב מול site בלבד (siteOnlyMatch)
+// לעולם לא מקדמת ל-'confident' — גם בשילוב עם מספר הזמנה תואם — כי שם יישוב
+// משותף לכמה הזמנות/משלמים שונים ואינו סימן ייחודי מספיק. כל מקרה אחר —
+// 0 מועמדים, כמה מועמדים, או מועמד יחיד עם רק siteOnlyMatch — 'ambiguous':
+// לא כותבים, לא מנחשים.
 export function decide(candidates: MatchCandidate[]): MatchDecision {
   if (candidates.length === 0) return 'none'
-  const strong = candidates.filter(c => c.orderNumberMatch && c.nameOrAddressMatch)
+  const strong = candidates.filter(c => c.orderNumberMatch && c.identityMatch)
   return strong.length === 1 ? 'confident' : 'ambiguous'
 }
