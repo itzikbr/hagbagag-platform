@@ -33,3 +33,25 @@ body {
 /* scrollbar hide */
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+
+/* ── הדפסה / ייצוא PDF (מסך מרחקים) ─────────────────────────── */
+/* מוצג רק בהדפסה — כותרת טופס האסבסט (שם עבודה + סוג היתר) */
+.print-only { display: none; }
+
+@media print {
+  .no-print { display: none !important; }
+  .print-only { display: block !important; }
+  /* טבלאות הטופס: גבולות נראים בנייר, ושורה לא נשברת בין עמודים */
+  table { border-collapse: collapse !important; width: 100% !important; }
+  th, td { border: 1px solid #999 !important; padding: 4px 6px !important; font-size: 11pt !important; }
+  th { background: #EEE !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  tr, thead { page-break-inside: avoid; }
+  /* מכל הגלילה האופקית של הטבלאות חייב להיפתח בנייר, אחרת עמודות נחתכות */
+  .tbl-scroll { overflow: visible !important; }
+  th, td { white-space: normal !important; }
+  section, .print-block { page-break-inside: avoid; }
+  html, body, #root { height: auto !important; overflow: visible !important; background: #fff !important; }
+  .no-scrollbar { overflow: visible !important; height: auto !important; }
+  img { max-width: 100% !important; page-break-inside: avoid; }
+}

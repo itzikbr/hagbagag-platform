@@ -1204,13 +1204,14 @@ function CollectionCard({ deal }: { deal: DealRow }) {
   )
 }
 
-function ProgressTab({ progress, workTypes, onChange, others, setOther, isFull, address, deal, dealLoading, dealMatchStatus, onStageChange, roofActive, roofSupplier, roofOrderDate, onRoofSupplier, onRoofOrderDate }: {
+function ProgressTab({ progress, workTypes, onChange, others, setOther, isFull, address, deal, dealLoading, dealMatchStatus, onStageChange, roofActive, roofSupplier, roofOrderDate, onRoofSupplier, onRoofOrderDate, onOpenMirchakim }: {
   progress: ProgressData; workTypes: string[]; onChange: (p: Partial<ProgressData>) => void
   others: Record<string, string>; setOther: (k: string, v: string) => void
   isFull: boolean; address: string
   deal: DealRow | null; dealLoading: boolean; dealMatchStatus: MatchDecision | null; onStageChange: (stage: number) => void
   roofActive: boolean; roofSupplier: string; roofOrderDate: string
   onRoofSupplier: (v: string) => void; onRoofOrderDate: (v: string) => void
+  onOpenMirchakim: () => void
 }) {
   const p = progress
 
@@ -1275,6 +1276,18 @@ function ProgressTab({ progress, workTypes, onChange, others, setOther, isFull, 
           <PermitStatus submission={p.asbestos_permit.submission_date} approval={p.asbestos_permit.approval_date} />
         </Card>
       )}
+
+      {/* כלי מרחקים — כרטיס עצמאי, מוצג בכל עבודה ולא רק באסבסט.
+          onOpenMirchakim מגיע מהקומפוננטה האב: navigate ו-sheetIdRef אינם
+          בהיקף של ProgressTab, ולכן קריאה ישירה אליהם נפלה ב-runtime. */}
+      <Card title="מרחקים למבנים סמוכים" tone="blue">
+        <button type="button" onClick={onOpenMirchakim}
+          style={{ width: '100%', padding: '11px 0', borderRadius: 20, border: '1px solid #1A5FAD',
+                   background: '#EEF2FF', color: '#1A3E7A', fontSize: 14.5, fontWeight: 700,
+                   cursor: 'pointer', fontFamily: 'inherit' }}>
+          📐 חשב מרחקים למבנים סמוכים
+        </button>
+      </Card>
 
       <Card title="ספקים" tone="blue">
         {/* חומר קירוי — ספק + תאריך הזמנה עצמאיים (מבלוק roofReplace), לא תלויים בתאריך הגלובלי */}
@@ -1362,6 +1375,7 @@ export default function NewExecutionSheet() {
   const sheetIdRef = useRef<string | null>(null)
   const latest = useRef(form); latest.current = form
   const savingRef = useRef(false)
+  const wcExtraRef = useRef<Record<string, unknown>>({})
   const lastErrRef = useRef<string | null>(null)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
@@ -1470,6 +1484,17 @@ export default function NewExecutionSheet() {
       if (cancelled) return
       const b = bs?.[0]
       const wc = (b?.work_content ?? {}) as Partial<SheetForm>
+      // מפתחות ב-work_content שהמסך הזה לא מנהל (נכתבים מ-/mirchakim וכד׳) —
+      // נשמרים בצד ומוחזרים בעת persist, אחרת שמירה מכאן הייתה מוחקת אותם.
+      wcExtraRef.current = (() => {
+        const known = new Set(['details', 'general', 'logistics', 'workTypes', 'blocks',
+                               'documentation', 'notes', 'others', 'smartMaterials'])
+        const out: Record<string, unknown> = {}
+        for (const k of Object.keys((b?.work_content ?? {}) as object)) {
+          if (!known.has(k)) out[k] = (b!.work_content as Record<string, unknown>)[k]
+        }
+        return out
+      })()
       const base = emptyForm()
       const merged: SheetForm = {
         details: { ...base.details, ...(wc.details ?? {}), date: sheet?.sheet_date ?? wc.details?.date ?? todayISO(), fillerName: wc.details?.fillerName ?? sheet?.filled_by_name ?? '', customerName: wc.details?.customerName ?? sheet?.project_name ?? '' },
@@ -1584,6 +1609,7 @@ export default function NewExecutionSheet() {
       needs_crane: f.logistics.crane !== '' && f.logistics.crane !== 'לא נדרש',
       needs_container: f.logistics.container !== '' && f.logistics.container !== 'לא נדרש',
       work_content: {
+        ...wcExtraRef.current,
         details: f.details, general: f.general, logistics: f.logistics,
         workTypes: f.workTypes, blocks: f.blocks,
         documentation: {
@@ -1893,6 +1919,10 @@ export default function NewExecutionSheet() {
             isFull={isFullView} address={form.details.address}
             deal={deal} dealLoading={dealLoading} dealMatchStatus={dealMatchStatus} onStageChange={handleStageChange}
             roofActive={form.workTypes.includes('roofReplace')}
+            onOpenMirchakim={async () => {
+              const id = sheetIdRef.current ?? await ensureSheetId()
+              navigate(id ? `/mirchakim?sheetId=${id}` : '/mirchakim')
+            }}
             roofSupplier={form.blocks.roofReplace.supplier ?? ''}
             roofOrderDate={form.blocks.roofReplace.orderDate ?? ''}
             onRoofSupplier={v => setRoof({ supplier: v })}
