@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { DEFAULT_PERMIT_TYPE, type PermitTypeKey, type AsbestosForm, type LabTests } from '../lib/asbestosPermit'
 import { queryWithRetry } from '../lib/dbRetry'
 import { matchDeals, decide, normalizeOrderNumber, type MatchDecision } from '../lib/dealMatching'
 import { useAuth, useIsAdmin } from '../hooks/useAuth'
@@ -174,6 +175,14 @@ interface AsbestosBuilding {
   asbestosKind: string                                 // סוג אסבסט: רגיל/אחר
   asbestosSub: string; asbestosSubOther: string        // סוג (רק כש-אחר)
   newRoof: string; newRoofNote: string                 // קירוי חדש + פירוט
+  // ── שדות היתר אסבסט (נערכים במסך /mirchakim, נשמרים כאן) ──
+  // asbestosForm ולא asbestosType: השם asbestosType תפוס בסכימה הישנה
+  // (נקרא ב-normalizeAsbestos), ושימוש חוזר בו היה מזהם דפים ישנים בשקט.
+  asbestosForm: AsbestosForm                           // גג / קירות / מערום / צנרת
+  demolition: boolean                                  // מבנה להריסה
+  labTests: LabTests                                   // דגימות מעבדה: 1-10 / אחר / null
+  weightKg: string                                     // משקל (ק"ג) — לתבנית "מוצר שלם"
+  lengthM: string                                      // אורך (מ') — לתבניות צנרת/תקרה
   note: string; noteOpen: boolean                      // הערה למבנה
 }
 interface AsbestosBlock {
@@ -219,7 +228,9 @@ interface MaterialsState { active: string[]; data: Record<string, MaterialCatego
 interface DocItem { path: string; url: string; name: string; note: string; noteOpen: boolean }
 interface Documentation { photos: DocItem[]; sketch: DocItem[]; documents: DocItem[] }
 
-interface AsbestosPermit { submission_date: string; approval_date: string; permit_number: string; supervisor: string }
+// permit_type — שדה יחיד לכל ההגשה כולה (לא לכל מבנה). ריבוי מבנים
+// נכנס תחת אותו סוג היתר; הסיווג שמוצג לכל שורה הוא הצעה בלבד.
+interface AsbestosPermit { submission_date: string; approval_date: string; permit_number: string; supervisor: string; permit_type: PermitTypeKey }
 interface ProgressData {
   asbestos_permit: AsbestosPermit
   suppliers: string[]
@@ -252,7 +263,9 @@ function emptyAsbBuilding(): AsbestosBuilding {
     coordX: '', coordY: '', roofSize: '', structureType: '', structureTypeOther: '',
     construction: '', constructionOther: '', height: '', grandpaStick: '', consState: '',
     ceiling: '', ceilingType: '', ceilingTypeOther: '', infra: '', asbestosKind: '', asbestosSub: '', asbestosSubOther: '',
-    newRoof: '', newRoofNote: '', note: '', noteOpen: false,
+    newRoof: '', newRoofNote: '',
+    asbestosForm: '', demolition: false, labTests: null, weightKg: '', lengthM: '',
+    note: '', noteOpen: false,
   }
 }
 function emptyAsbestos(): AsbestosBlock {
@@ -309,7 +322,7 @@ function emptyCategory(): MaterialCategory {
 }
 function emptyProgress(): ProgressData {
   return {
-    asbestos_permit: { submission_date: '', approval_date: '', permit_number: '', supervisor: '' },
+    asbestos_permit: { submission_date: '', approval_date: '', permit_number: '', supervisor: '', permit_type: DEFAULT_PERMIT_TYPE },
     suppliers: ['', '', ''],
     materials_order_date: '', materials_arrival_date: '',
     execution_date: '', estimated_days: '', team_lead: '', subcontractor: '',
