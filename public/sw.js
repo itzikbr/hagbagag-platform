@@ -3,7 +3,7 @@
 // אחראי על: Push Notifications + Cache (offline basic)
 // ============================================================
 
-const CACHE_NAME = 'hagbagag-v9'
+const CACHE_NAME = 'hagbagag-v10'
 const OFFLINE_FALLBACK = '/offline.html'
 
 // קבצים לשמירה בקאש ראשוני
@@ -53,8 +53,17 @@ self.addEventListener('fetch', event => {
     event.respondWith((async () => {
       try {
         const fresh = await fetch(req)
-        const cache = await caches.open(CACHE_NAME)
-        cache.put('/', fresh.clone())
+        // רק ניווט לשורש מעדכן את ה-shell. בלי התנאי הזה כל ניווט נשמר
+        // תחת המפתח '/' — כך שביקור ב-/oauth-drive-callback היה הופך את
+        // דף ההצלחה של OAuth ל-shell של האפליקציה במצב offline.
+        // בנוסף: תשובת 302 (למשל /drive-auth) היא opaqueredirect,
+        // ו-cache.put דוחה אותה — מה שיצר unhandled rejection.
+        if (url.pathname === '/' || url.pathname === '/index.html') {
+          if (fresh.ok && fresh.type !== 'opaqueredirect') {
+            const cache = await caches.open(CACHE_NAME)
+            await cache.put('/', fresh.clone())
+          }
+        }
         return fresh
       } catch {
         return (await caches.match('/')) || (await caches.match(OFFLINE_FALLBACK)) || Response.error()
