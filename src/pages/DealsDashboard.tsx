@@ -21,10 +21,14 @@ interface DealRow {
   customer_name: string | null
   total_price: number | null
   stage: number
+  stage_updated_at: string | null
+  created_at: string | null
   balance_due: number | null
   balance_note: string | null
-  raw_data: { profit_pct?: number; site?: string; contact?: string; handled_by?: string; profit?: number; order_status_raw?: string } | null
+  raw_data: { profit_pct?: number; site?: string; contact?: string; handled_by?: string; profit?: number; order_status_raw?: string; date_serial?: number | string } | null
 }
+// גיול מצרפי ברמת לקוח (טבלת customer_aging) — מתרענן שבועית מקובץ פריוריטי
+interface AgingRow { customer_number: string; aging_total: number; as_of_date: string }
 
 // 8 שלבים — שמות/צבעים כפי שנקבעו במוקאף המאושר (אין עדיין קונבנציית צבע
 // קיימת ל-8 שלבים במקום אחר באפליקציה — StageCard בדף הביצוע הבודד מטפל
@@ -54,6 +58,12 @@ function ilsCompact(n: number): string {
   if (abs >= 1_000) return Math.round(n / 1_000) + 'K ₪'
   return ils(n)
 }
+// 2026-08-16 → 16/08/26
+function fmtDate(iso: string): string {
+  const d = new Date(iso)
+  return isNaN(d.getTime()) ? iso
+    : `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getFullYear()).slice(2)}`
+}
 function profitTone(pct: number): { bg: string; color: string } {
   if (pct < 20) return { bg: '#FDECEC', color: RED }
   if (pct < 35) return { bg: '#FFF1E0', color: '#B5651D' }
@@ -64,6 +74,7 @@ export default function DealsDashboard() {
   const navigate = useNavigate()
   const [deals, setDeals] = useState<DealRow[]>([])
   const [linkCounts, setLinkCounts] = useState<Map<string, number>>(new Map())
+  const [agingByCustomer, setAgingByCustomer] = useState<Map<string, AgingRow>>(new Map())
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selectedStage, setSelectedStage] = useState<number | null>(null)   // null = "הכל הפעיל"
@@ -80,18 +91,25 @@ export default function DealsDashboard() {
     if (!background) { setLoading(true); setError(null); loadStartRef.current = Date.now() }
     const t0 = Date.now()
     try {
-      const [dealRows, sheetOrderNumbers] = await Promise.all([
+      const [dealRows, sheetOrderNumbers, agingRows] = await Promise.all([
         queryWithRetry<DealRow[]>(() => supabase.from('deals').select('*')),
         queryWithRetry<{ order_number: string }[]>(() =>
           supabase.from('execution_sheets').select('order_number').not('order_number', 'is', null)),
+        // גיול מצרפי ברמת לקוח — הנתון היחיד שאומר כמה הלקוח *באמת* חייב
+        // כשיש לו כמה הזמנות פתוחות ו-balance_due נשאר NULL בכולן.
+        queryWithRetry<AgingRow[]>(() =>
+          supabase.from('customer_aging').select('customer_number, aging_total, as_of_date')),
       ])
       if (!aliveRef.current || seq !== reqSeq.current) return
       const counts = new Map<string, number>()
       for (const r of sheetOrderNumbers ?? []) {
         counts.set(r.order_number, (counts.get(r.order_number) ?? 0) + 1)
       }
+      const aging = new Map<string, AgingRow>()
+      for (const a of agingRows ?? []) aging.set(a.customer_number, a)
       setDeals(dealRows ?? [])
       setLinkCounts(counts)
+      setAgingByCustomer(aging)
       setError(null)
     } catch (e) {
       console.error('[deals-dashboard] load failed:', e)
@@ -164,11 +182,14 @@ export default function DealsDashboard() {
 
   // כמה עסקאות פתוחות (stage≠7) יש לכל customer_number — לתצוגת "יתרה משוערת"
   // בלבד (ראו BalanceRow). לא נכתב לשום מקום ב-DB.
-  const openCountByCustomer = useMemo(() => {
-    const m = new Map<string, number>()
+  // גם הסכום, לא רק המניין — האזהרה על לקוח מרובה-הזמנות מציגה את שניהם.
+  const openByCustomer = useMemo(() => {
+    const m = new Map<string, { count: number; sum: number }>()
     for (const d of deals) {
       if (d.stage === HISTORY_STAGE || !d.customer_number) continue
-      m.set(d.customer_number, (m.get(d.customer_number) ?? 0) + 1)
+      const cur = m.get(d.customer_number) ?? { count: 0, sum: 0 }
+      cur.count += 1; cur.sum += d.total_price ?? 0
+      m.set(d.customer_number, cur)
     }
     return m
   }, [deals])
@@ -188,6 +209,10 @@ export default function DealsDashboard() {
       <div style={{ background: RED, padding: '12px 16px 8px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, position: 'relative' }}>
         <button onClick={() => navigate('/sheets')} title="חזרה"
           style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#fff', fontSize: 22, lineHeight: 1, fontFamily: 'inherit' }}>←</button>
+        {/* כניסה כללית זמנית לכלי המרחקים — המיקום הסופי בתפריט יוסדר
+            בעיצוב הניווט מחדש. בלי sheetId ⇒ בדיקה חד-פעמית שלא נשמרת. */}
+        <button onClick={() => navigate('/mirchakim')} title="מרחקים למבנים סמוכים"
+          style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', background: 'rgba(255,255,255,0.18)', border: '1px solid rgba(255,255,255,0.45)', cursor: 'pointer', color: '#fff', fontSize: 12.5, fontWeight: 700, borderRadius: 14, padding: '5px 11px', fontFamily: 'inherit' }}>📐 מרחקים</button>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', lineHeight: 1.15 }}>
           <span style={{ color: '#fff', fontSize: 20, fontWeight: 700 }}>לוח בקרה עסקאות</span>
           <span style={{ color: 'rgba(255,255,255,0.85)', fontSize: 12, fontWeight: 400 }}>חג בגג</span>
@@ -244,7 +269,7 @@ export default function DealsDashboard() {
               {visibleRows.length === 0 && (
                 <div style={{ padding: 32, textAlign: 'center', color: GREY, fontSize: 14 }}>אין עסקאות בסינון הזה</div>
               )}
-              {visibleRows.map(d => <DealCard key={d.id} deal={d} linkedCount={linkCounts.get(d.order_number) ?? 0} openCountForCustomer={d.customer_number ? openCountByCustomer.get(d.customer_number) ?? 0 : 0} />)}
+              {visibleRows.map(d => <DealCard key={d.id} deal={d} linkedCount={linkCounts.get(d.order_number) ?? 0} openCountForCustomer={d.customer_number ? openByCustomer.get(d.customer_number)?.count ?? 0 : 0} openSumForCustomer={d.customer_number ? openByCustomer.get(d.customer_number)?.sum ?? 0 : 0} aging={d.customer_number ? agingByCustomer.get(d.customer_number) ?? null : null} />)}
             </div>
 
             {/* היסטוריה — סגורות, מקופל בברירת מחדל */}
@@ -264,7 +289,7 @@ export default function DealsDashboard() {
                   <div style={{ fontSize: 11.5, color: GREY, padding: '10px 6px 4px', direction: 'rtl' }}>
                     {HISTORY_TOP_N} הגדולות מתוך {historyDeals.count} — לא נטען הכל, כדי לא להעמיס בשוטף.
                   </div>
-                  {historyDeals.top.map(d => <DealCard key={d.id} deal={d} linkedCount={linkCounts.get(d.order_number) ?? 0} openCountForCustomer={d.customer_number ? openCountByCustomer.get(d.customer_number) ?? 0 : 0} />)}
+                  {historyDeals.top.map(d => <DealCard key={d.id} deal={d} linkedCount={linkCounts.get(d.order_number) ?? 0} openCountForCustomer={d.customer_number ? openByCustomer.get(d.customer_number)?.count ?? 0 : 0} openSumForCustomer={d.customer_number ? openByCustomer.get(d.customer_number)?.sum ?? 0 : 0} aging={d.customer_number ? agingByCustomer.get(d.customer_number) ?? null : null} />)}
                 </div>
               )}
             </div>
@@ -302,11 +327,48 @@ function balanceInfo(deal: DealRow, openCountForCustomer: number): { value: numb
   return { value: deal.total_price, verified: false, warnStrong: openCountForCustomer > 1 }
 }
 
-function DealCard({ deal, linkedCount, openCountForCustomer }: { deal: DealRow; linkedCount: number; openCountForCustomer: number }) {
+// דגלים מתוך balance_note — מילות מפתח שנכתבות בסקירות הגיול. הצבע שונה
+// בכוונה מאזהרת "יתרה משוערת": שם מדובר בחוסר ודאות בחישוב, כאן בפריט
+// שממתין להכרעה אנושית.
+const NOTE_FLAGS: { kw: string; label: string; bg: string; fg: string; border: string }[] = [
+  { kw: 'סתירה',        label: '⚠️ סתירה — בבדיקה',  bg: '#FDE7E9', fg: '#8E1B27', border: '#F0A9B2' },
+  { kw: 'מועמד לסגירה', label: '🏁 מועמד לסגירה',     bg: '#E8F0FE', fg: '#1A3E7A', border: '#A9C2F0' },
+]
+function noteFlags(note: string | null): typeof NOTE_FLAGS {
+  if (!note) return []
+  return NOTE_FLAGS.filter(f => note.includes(f.kw))
+}
+
+// גיל ההזמנה בימים.
+// כאן *לא* משתמשים ב-stage_updated_at/created_at: שניהם חותמות של ייבוא ה-DB
+// (כל 359 העסקאות יובאו ב-08/2026 ונחתמו יחד), ולכן הם לא מודדים כלום עסקית —
+// דגל שמבוסס עליהם יורה על 0 שורות. raw_data.date_serial הוא תאריך ההזמנה
+// האמיתי מפריוריטי (סריאל אקסל), וזה הסימן היחיד שמשקף גיל בפועל.
+function excelSerialToDate(v: unknown): Date | null {
+  const n = Number(v)
+  if (!isFinite(n) || n <= 0) return null
+  return new Date(Date.UTC(1899, 11, 30) + Math.floor(n) * 86_400_000)
+}
+function orderAgeDays(deal: DealRow): number | null {
+  const d = excelSerialToDate(deal.raw_data?.date_serial)
+    ?? (deal.stage_updated_at || deal.created_at ? new Date(deal.stage_updated_at || deal.created_at!) : null)
+  if (!d || isNaN(d.getTime())) return null
+  return Math.floor((Date.now() - d.getTime()) / 86_400_000)
+}
+const STUCK_DAYS = 60
+const STUCK_STAGES = [3, 4, 5]
+
+function DealCard({ deal, linkedCount, openCountForCustomer, openSumForCustomer, aging }: {
+  deal: DealRow; linkedCount: number; openCountForCustomer: number; openSumForCustomer: number; aging: AgingRow | null
+}) {
   const meta = STAGE_META[deal.stage] ?? STAGE_META[1]
   const profitPct = deal.raw_data?.profit_pct
   const tone = profitPct != null ? profitTone(profitPct) : null
   const bal = balanceInfo(deal, openCountForCustomer)
+  const flags = noteFlags(deal.balance_note)
+  const [noteOpen, setNoteOpen] = useState(false)
+  const ageDays = orderAgeDays(deal)
+  const stuck = STUCK_STAGES.includes(deal.stage) && ageDays != null && ageDays > STUCK_DAYS
   return (
     <div style={{ background: '#fff', borderRadius: 12, border: `1px solid ${BORDER}`, padding: '12px 14px', marginBottom: 8, direction: 'rtl' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
@@ -316,7 +378,24 @@ function DealCard({ deal, linkedCount, openCountForCustomer }: { deal: DealRow; 
           </div>
           <div style={{ fontSize: 12.5, color: GREY, marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>{deal.order_number}</div>
         </div>
-        <div style={{ fontSize: 17, fontWeight: 900, color: '#111', flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}>{ils(deal.total_price)}</div>
+        {/* המספר הראשי: כשיש balance_due מאומת — הוא הנתון שמעניין ("נותר
+            לתשלום"), ו-total_price יורד לשורת משנה. בלי balance_due נשאר
+            total_price כראשי, בדיוק כמו קודם. */}
+        <div style={{ flexShrink: 0, textAlign: 'left' }}>
+          {bal.verified ? (
+            <>
+              <div style={{ fontSize: 10.5, fontWeight: 700, color: GREY, letterSpacing: 0.2 }}>נותר לתשלום</div>
+              <div style={{ fontSize: 17, fontWeight: 900, color: bal.value! < 0 ? '#1A5A2A' : '#111', fontVariantNumeric: 'tabular-nums', lineHeight: 1.2 }}>
+                {ils(bal.value)}
+              </div>
+              <div style={{ fontSize: 11, fontWeight: 600, color: GREY, fontVariantNumeric: 'tabular-nums' }}>
+                מתוך {ils(deal.total_price)}
+              </div>
+            </>
+          ) : (
+            <div style={{ fontSize: 17, fontWeight: 900, color: '#111', fontVariantNumeric: 'tabular-nums' }}>{ils(deal.total_price)}</div>
+          )}
+        </div>
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
@@ -330,6 +409,22 @@ function DealCard({ deal, linkedCount, openCountForCustomer }: { deal: DealRow; 
           <span style={{ fontSize: 12, fontWeight: 700, color: '#1A5A2A' }}>🔗 {linkedCount} דפי ביצוע</span>
         ) : (
           <span style={{ fontSize: 12, fontWeight: 700, color: GREY }}>— אין דף ביצוע</span>
+        )}
+        {/* דגלי balance_note — לחיצה פותחת את ההערה המלאה */}
+        {flags.map(f => (
+          <button key={f.kw} type="button" onClick={() => setNoteOpen(o => !o)}
+            title={deal.balance_note ?? ''}
+            style={{ fontSize: 12, fontWeight: 800, background: f.bg, color: f.fg, border: `1px solid ${f.border}`,
+                     borderRadius: 8, padding: '2px 10px', cursor: 'pointer', fontFamily: 'inherit' }}>
+            {f.label} {noteOpen ? '▴' : '▾'}
+          </button>
+        ))}
+        {/* דגל "סטטוס תקוע" — שלבים 3-5 בלבד */}
+        {stuck && (
+          <span title={`תאריך ההזמנה בפריוריטי: לפני ${ageDays} ימים. הסטטוס לא עודכן מאז — ייתכן שהעבודה כבר הסתיימה.`}
+            style={{ fontSize: 12, fontWeight: 800, background: '#F3EAFB', color: '#5B2E8A', border: '1px solid #CDB2E6', borderRadius: 8, padding: '2px 10px' }}>
+            ⏳ ללא שינוי סטטוס {ageDays} ימים
+          </span>
         )}
       </div>
 
@@ -346,14 +441,21 @@ function DealCard({ deal, linkedCount, openCountForCustomer }: { deal: DealRow; 
           bal.warnStrong ? (
             <div style={{ fontSize: 11.5, fontWeight: 700, color: '#8A4B00', background: '#FFF1DB', border: '1px solid #F0C98C', borderRadius: 6, padding: '4px 8px', marginTop: 6 }}>
               ⚠️ יתרה משוערת — ללקוח זה יש כמה עסקאות פתוחות, לא ניתן לפצל בין הזמנות
+              <div style={{ fontWeight: 600, marginTop: 3 }}>
+                {aging
+                  ? <>הלקוח חייב בסה״כ <b>{ils(aging.aging_total)}</b> (גיול {fmtDate(aging.as_of_date)}), על פני {openCountForCustomer} הזמנות פתוחות בסכום כולל {ils(openSumForCustomer)}</>
+                  : <>{openCountForCustomer} הזמנות פתוחות בסכום כולל {ils(openSumForCustomer)} — אין נתון גיול ללקוח זה</>}
+              </div>
             </div>
           ) : (
             <div style={{ fontSize: 11, fontWeight: 600, color: '#8A6D00', marginTop: 3 }}>יתרה משוערת (טרם אומת)</div>
           )
         )}
       </div>
-      {deal.balance_note && (
-        <div style={{ fontSize: 11.5, color: '#7a5b00', background: '#FFF8E6', border: '1px solid #F0D98C', borderRadius: 6, padding: '4px 8px', marginTop: 6 }}>
+      {/* ההערה המלאה: כשיש דגל היא מוצגת רק בלחיצה עליו (כדי לא להציף את
+          הכרטיס), וכשאין דגל היא מוצגת תמיד — ההתנהגות שהייתה קודם. */}
+      {deal.balance_note && (flags.length === 0 || noteOpen) && (
+        <div style={{ fontSize: 11.5, color: '#7a5b00', background: '#FFF8E6', border: '1px solid #F0D98C', borderRadius: 6, padding: '4px 8px', marginTop: 6, lineHeight: 1.45 }}>
           ⚠️ {deal.balance_note}
         </div>
       )}

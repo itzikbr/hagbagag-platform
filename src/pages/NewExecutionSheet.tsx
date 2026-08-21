@@ -135,6 +135,13 @@ interface DetailsTab {
   address: string
   phones: string[]
   solarPrep: boolean
+  // מ-deals/פריוריטי, לא מהקלדה בשדה. נפרדים מ-customerName בכוונה: השם שהמזמין
+  // הקליד ("גן שקד") הוא מה שמזהה את הדף בשטח, והשם הרשמי ("קיבוץ רגבים") הוא
+  // מי שמשלם. דריסה של האחד בשני מוחקת מידע.
+  officialCustomerName: string
+  contactPerson: string
+  // איש הקשר שייך להזמנה כולה ולא למבנה הזה (עסקה שפרושה על כמה דפים)
+  contactIsOrderLevel?: boolean
 }
 interface GeneralProps {
   roofHeight: string
@@ -310,7 +317,7 @@ function emptyProgress(): ProgressData {
 }
 function emptyForm(): SheetForm {
   return {
-    details: { date: todayISO(), fillerName: '', orderNumber: '', customerName: '', address: '', phones: [''], solarPrep: false },
+    details: { date: todayISO(), fillerName: '', orderNumber: '', customerName: '', address: '', phones: [''], solarPrep: false, officialCustomerName: '', contactPerson: '' },
     general: { roofHeight: '', area: '', roofType: '', construction: '', chips: [] },
     logistics: { crane: '', container: '', lift: '', arm: '', access: '', workHeight: '', chips: [] },
     workTypes: [],
@@ -1759,6 +1766,14 @@ export default function NewExecutionSheet() {
                 <Field label="הזמנה מס׳"><TextInput value={form.details.orderNumber} onChange={v => patchDetails({ orderNumber: v })} placeholder="מס׳ הזמנה" maxLength={12} /></Field>
               </div>
               <div style={{ marginBottom: 8 }}><Field label="שם לקוח"><TextInput value={form.details.customerName} onChange={v => patchDetails({ customerName: v })} placeholder="שם הלקוח" /></Field></div>
+              {/* שם רשמי ואיש קשר — מגיעים מ-deals (פריוריטי) וניתנים לתיקון בשדה.
+                  לא ממולאים אוטומטית מ"שם לקוח": זה שדה אחר במשמעותו. */}
+              <div style={{ marginBottom: 8 }}><Field label="שם רשמי (מפריוריטי)"><TextInput value={form.details.officialCustomerName ?? ''} onChange={v => patchDetails({ officialCustomerName: v })} placeholder="שם הלקוח המשלם, אם שונה" /></Field></div>
+              <div style={{ marginBottom: 8 }}>
+                <Field label={form.details.contactIsOrderLevel ? 'איש קשר (כללי להזמנה)' : 'איש קשר'}>
+                  <TextInput value={form.details.contactPerson ?? ''} onChange={v => patchDetails({ contactPerson: v })} placeholder="שם איש הקשר" />
+                </Field>
+              </div>
               <div style={{ marginBottom: 8 }}><Field label="כתובת"><TextInput value={form.details.address} onChange={v => patchDetails({ address: v })} placeholder="כתובת האתר" /></Field></div>
               <div style={{ marginBottom: 8 }}>
                 <div style={labelStyle}>טלפון</div>

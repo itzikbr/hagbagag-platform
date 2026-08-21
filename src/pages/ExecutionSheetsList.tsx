@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth, useIsAdmin } from '../hooks/useAuth'
 import { reportClient, errDetail } from '../lib/report'
+import { normalizeOrderNumber } from '../lib/dealMatching'
 
 // ── טיפוסים ────────────────────────────────────────────────────
 // dt = work_content->details בלבד (הרשימה צריכה רק אותו) — לא מושכים את כל ה-JSON הכבד.
@@ -12,6 +13,7 @@ interface SheetRow {
   project_name: string
   is_archived: boolean
   filled_by_name: string | null
+  order_number: string | null
   progress_data: { execution_date?: string; team_lead?: string; subcontractor?: string } | null
   buildings: BuildingRow[] | null
 }
@@ -19,7 +21,8 @@ interface DecoratedSheet {
   id: string
   name: string
   address: string
-  orderNumber: string
+  orderNumber: string       // תמיד בפורמט הקצר שבשטח ("111/26") — ראו shortOrder
+  orderSearch: string       // שני הפורמטים יחד, לחיפוש בלבד
   execDate: Date | null
   execMs: number
   when: 'past' | 'today' | 'future' | 'none'
@@ -60,6 +63,14 @@ function todayMidnight(): Date {
   const n = new Date()
   return new Date(n.getFullYear(), n.getMonth(), n.getDate())
 }
+// מספר ההזמנה לתצוגה — תמיד בפורמט הקצר שבו מדברים בשטח ("111/26"), גם כשב-DB
+// שמור הפורמט המלא של פריוריטי ("SO26000111"). משתמש ב-normalizeOrderNumber
+// הקיים (lib/dealMatching) ולא בפירוק מקומי, כדי שיהיה מפתח אחד לכל האפליקציה.
+// לא מזוהה → מוחזר כפי שהוא, בלי לנחש.
+function shortOrder(raw?: string | null): string {
+  const n = normalizeOrderNumber(raw)
+  return n ? `${n.serial}/${String(n.year).padStart(2, '0')}` : (raw ?? '').trim()
+}
 function whenOf(d: Date | null, today: Date): DecoratedSheet['when'] {
   if (!d) return 'none'
   const t = d.getTime()
@@ -69,15 +80,17 @@ function whenOf(d: Date | null, today: Date): DecoratedSheet['when'] {
 function fmtDM(d: Date | null): string {
   return d ? `${d.getDate()}.${d.getMonth() + 1}` : '—'
 }
-// קיצור שם: יותר מ-2 לקוחות (מופרדים בפסיק) → "הלקוח הראשון ועוד";
-// אחרת, יותר מ-2 מילים → השם הפרטי הראשון בלבד; אחרת השם המלא.
+// קיצור שם: השם המלא, ורק אם הוא ארוך מדי — חיתוך לפי אורך תווים עם "…".
+// הכלל הישן ("יותר מ-2 מילים → המילה הראשונה") הוסר: הוא הפך כל שם מוסדי
+// לחסר משמעות — "אשכול גליל מזרחי-איגוד ערים" הוצג כ"אשכול", וכל הקיבוצים
+// הוצגו כ"קיבוץ" זה ליד זה. אורך אינו מילים.
+// יותר מ-2 לקוחות מופרדים בפסיק → "הראשון ועוד" (קיצור סמנטי, לא שרירותי).
+const NAME_MAX = 30
 function shortName(name: string): string {
   const clean = (name || '').trim()
   const customers = clean.split(',').map(s => s.trim()).filter(Boolean)
   if (customers.length > 2) return `${customers[0]} ועוד`
-  const words = clean.split(/\s+/).filter(Boolean)
-  if (words.length > 2) return words[0]
-  return clean
+  return clean.length > NAME_MAX ? clean.slice(0, NAME_MAX - 1).trimEnd() + '…' : clean
 }
 
 // ── צבעי תגית תאריך ────────────────────────────────────────────
@@ -162,7 +175,7 @@ export default function ExecutionSheetsList() {
     try {
       const query = supabase
         .from('execution_sheets')
-        .select('id, project_name, is_archived, filled_by_name, progress_data, buildings(dt:work_content->details)')
+        .select('id, project_name, is_archived, filled_by_name, order_number, progress_data, buildings(dt:work_content->details)')
         .order('created_at', { ascending: false })
       const { data, error } = await Promise.race([query, timeout]) as
         { data: SheetRow[] | null; error: { message: string } | null }
@@ -270,11 +283,15 @@ export default function ExecutionSheetsList() {
     .map(s => {
       const details = s.buildings?.[0]?.dt ?? {}
       const execDate = parseExec(s.progress_data?.execution_date)
+      // מספר ההזמנה: מה שהוקלד בטופס, ואם ריק — הערך הקנוני מ-execution_sheets
+      // (דפים שקושרו/נוצרו מ-deals מחזיקים אותו שם ולא ב-details).
+      const rawOrder = details.orderNumber?.trim() || s.order_number || ''
       return {
         id: s.id,
         name: s.project_name || details.customerName || 'דף ביצוע',
         address: details.address ?? '',
-        orderNumber: details.orderNumber ?? '',
+        orderNumber: shortOrder(rawOrder),
+        orderSearch: `${rawOrder} ${shortOrder(rawOrder)}`.toLowerCase(),
         execDate,
         execMs: execDate ? execDate.getTime() : Infinity,
         when: whenOf(execDate, today),
@@ -292,7 +309,7 @@ export default function ExecutionSheetsList() {
 
   const q = search.trim().toLowerCase()
   const bySearch = q
-    ? decorated.filter(d => d.name.toLowerCase().includes(q) || d.orderNumber.toLowerCase().includes(q))
+    ? decorated.filter(d => d.name.toLowerCase().includes(q) || d.orderSearch.includes(q))
     : decorated
   // סינון לפי ממלא הטופס: בחירה ריקה = הכל (ללא סינון)
   const byFiller = selectedFillers.length
@@ -344,6 +361,18 @@ export default function ExecutionSheetsList() {
         background: RED, padding: '12px 16px 8px', display: 'flex', alignItems: 'center',
         justifyContent: 'center', flexShrink: 0, position: 'relative',
       }}>
+        {/* כניסה כללית לכלי המרחקים — בכותרת מסך הדפים, שהוא מסך הבית
+            של כולם. הכפתור בלוח הבקרה נשאר, אבל שם צריך קודם לנווט ל-/deals
+            והוא admin-only, ולכן לא נמצא בפועל. המיקום הסופי בתפריט
+            יוסדר בעיצוב הניווט מחדש. */}
+        <button onClick={() => navigate('/mirchakim')} title="מרחקים למבנים סמוכים"
+          style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)',
+                   background: 'rgba(255,255,255,0.18)', border: '1px solid rgba(255,255,255,0.45)',
+                   cursor: 'pointer', color: '#fff', fontSize: 12.5, fontWeight: 700,
+                   borderRadius: 14, padding: '5px 11px', fontFamily: 'inherit', display: 'flex',
+                   alignItems: 'center', gap: 5 }}>
+          📐 מרחקים
+        </button>
         {view === 'archived' ? (
           <button onClick={() => setView('active')} title="חזרה"
             style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#fff', fontSize: 15, fontWeight: 700, fontFamily: 'inherit' }}>
@@ -718,6 +747,13 @@ function SheetCard({ d, index, view, onOpen, onView, onArchive, onRestore, onDel
           <span style={{ fontSize: 14, fontWeight: 700, background: badge.bg, color: badge.color, borderRadius: 8, padding: '2px 9px', flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}>
             {fmtDM(d.execDate)}
           </span>
+          {/* מספר הזמנה — הדבר היחיד שמבדיל בין כמה דפים של אותו לקוח באותו יישוב
+              (למשל 4 הזמנות נפרדות של מעגן מיכאל). בלעדיו הכרטיסים זהים. */}
+          {d.orderNumber && (
+            <span style={{ fontSize: 13, fontWeight: 700, background: '#EFEBE7', color: '#4A4A4A', borderRadius: 8, padding: '2px 8px', flexShrink: 0, fontVariantNumeric: 'tabular-nums' }} dir="ltr">
+              {d.orderNumber}
+            </span>
+          )}
           {row2Parts && (
             <span style={{ fontSize: 14, fontWeight: 600, color: '#555', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {row2Parts}

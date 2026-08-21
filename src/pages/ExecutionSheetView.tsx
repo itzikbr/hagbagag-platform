@@ -64,7 +64,11 @@ interface Blocks {
   other?: { note?: string }
 }
 interface WorkContent {
-  details?: { date?: string; fillerName?: string; orderNumber?: string; customerName?: string; address?: string; phones?: string[]; solarPrep?: boolean }
+  // officialCustomerName/contactPerson מגיעים מ-deals (פריוריטי) ולא מהקלדה בשדה,
+  // ולכן הם שדות נפרדים ולא דורסים את customerName שהמזמין הקליד.
+  // contactIsOrderLevel=true → איש הקשר הוא של ההזמנה כולה, לא של המבנה הזה
+  // (עסקה אחת שפרושה על כמה דפים, למשל כמה גנים באותו קיבוץ).
+  details?: { date?: string; fillerName?: string; orderNumber?: string; customerName?: string; address?: string; phones?: string[]; solarPrep?: boolean; officialCustomerName?: string; contactPerson?: string; contactIsOrderLevel?: boolean }
   general?: { roofHeight?: string; area?: string; roofType?: string; construction?: string; chips?: string[] }
   logistics?: { crane?: string; container?: string; lift?: string; arm?: string; access?: string; workHeight?: string; chips?: string[] }
   workTypes?: string[]
@@ -199,7 +203,15 @@ export function SheetSections({ data, catSort, onOpenGallery }: {
           </div>
         )}
         {!has(d.customerName) && <Row label="כתובת" value={d.address} />}
+        {/* השם הרשמי מוצג רק כשהוא באמת מוסיף מידע — כלומר שונה מהשם שהוקלד.
+            כשהדף נקרא "גן שקד" והלקוח הרשמי הוא "קיבוץ רגבים", שניהם נחוצים. */}
+        {has(d.officialCustomerName) && d.officialCustomerName?.trim() !== d.customerName?.trim() && (
+          <Row label="שם רשמי" value={d.officialCustomerName} />
+        )}
         {has(d.orderNumber) && <Row label="הזמנה מס׳" value={d.orderNumber} />}
+        {has(d.contactPerson) && (
+          <Row label={d.contactIsOrderLevel ? 'איש קשר (כללי להזמנה)' : 'איש קשר'} value={d.contactPerson} />
+        )}
         {phones.length > 0 && (
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10, padding: '7px 12px', direction: 'rtl' }}>
             <span style={{ fontSize: 13, fontWeight: 600, color: GREY, flexShrink: 0 }}>טלפון</span>
