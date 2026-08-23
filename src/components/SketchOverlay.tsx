@@ -80,14 +80,16 @@ function MeasureLabel({ ax, ay, bx, by, text, s }: {
   let ang = (Math.atan2(by - ay, bx - ax) * 180) / Math.PI
   if (ang > 90) ang -= 180
   if (ang < -90) ang += 180
-  const w = text.length * 9 * s + 12 * s
-  const h = 20 * s
+  // הוגדל: אלה התוויות היחידות שנשארו אחרי שקווי המרחק של המנוע כובו,
+  // והן צריכות להיקרא גם בהקטנה ל-A4.
+  const w = text.length * 12 * s + 18 * s
+  const h = 28 * s
   return (
     <g transform={`translate(${mx} ${my}) rotate(${ang})`}>
-      <rect x={-w / 2} y={-h / 2} width={w} height={h} rx={4 * s}
-        fill="rgba(255,255,255,0.88)" stroke={MEAS} strokeWidth={s} />
+      <rect x={-w / 2} y={-h / 2} width={w} height={h} rx={5 * s}
+        fill="rgba(255,255,255,0.93)" stroke={MEAS} strokeWidth={1.4 * s} />
       <text x={0} y={0} textAnchor="middle" dominantBaseline="central"
-        fontSize={13 * s} fontWeight={700} fill="#1E3A8A"
+        fontSize={18 * s} fontWeight={800} fill="#1E3A8A"
         fontFamily="system-ui, -apple-system, sans-serif">{text}</text>
     </g>
   )

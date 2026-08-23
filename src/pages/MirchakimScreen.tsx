@@ -255,7 +255,7 @@ export default function MirchakimScreen() {
   const showKg = editAsb || asbRows.some(r => toNum(r.weightKg) !== null)
 
   // מדרג ההרחבה. כל הכפלה מרבעת את מספר האריחים, לכן צעדים ולא רציף.
-  const RADIUS_STEPS = [100, 150, 250, 400, 600, 900, 1200]
+  const RADIUS_STEPS = [50, 75, 100, 150, 250, 400, 600, 900, 1200]
 
   function openPicker(la: number, lo: number) {
     setPickAt({ lat: la, lon: lo, label: label.trim() || address.trim() || null })
@@ -598,7 +598,7 @@ export default function MirchakimScreen() {
               <Field label="שם / תיאור (לא חובה)"><Inp value={label} onChange={setLabel} placeholder="למשל: מחסן אסבסט מזרחי" /></Field>
             </div>
             <div style={{ flex: 1 }}>
-              <Field label="רדיוס (מ׳)"><Inp value={radiusM} onChange={setRadiusM} placeholder="ברירת מחדל 100" dir="ltr" /></Field>
+              <Field label="רדיוס (מ׳)"><Inp value={radiusM} onChange={setRadiusM} placeholder="ברירת מחדל 50" dir="ltr" /></Field>
             </div>
           </div>
 
@@ -1083,7 +1083,7 @@ export default function MirchakimScreen() {
 
       {pickAt && (
         <LocationPicker lat={pickAt.lat} lon={pickAt.lon} label={pickAt.label}
-          radiusM={radiusM.trim() ? Number(radiusM.trim()) || 100 : 100}
+          radiusM={radiusM.trim() ? Number(radiusM.trim()) || 50 : 50}
           onCancel={() => setPickAt(null)}
           onConfirm={(p: PickedPoint) => { setPickAt(null); void run(undefined, p) }} />
       )}
