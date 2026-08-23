@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import SketchOverlay, { type Measure, type Proj, type GeoPt } from '../components/SketchOverlay'
 import {
   PERMIT_TYPES, PERMIT_INFO, DEFAULT_PERMIT_TYPE, permitDef, permitTiming,
   classifyBuilding, classColors, labTestsLabel, toNum, ASB_FORM_OPTS,
@@ -28,13 +29,18 @@ interface Building {
   needs_completion: boolean
   drawn?: boolean
   draw_reason?: string | null
+  // מגיעים מהשרת מאז ומתמיד (asdict של ה-dataclass); poly_px נוסף עבור
+  // שכבת הסימון — המתאר כבר מומר לפיקסלים ע"י אותו P שמצייר את הסקיצה.
+  lat?: number
+  lon?: number
+  poly_px?: number[][]
 }
 interface PublicPlace { name: string; kind: string; distance_m: number; settlement: string | null }
 interface Result {
   input: { source: string; itm: number[]; wgs84: number[]; label: string | null }
   buildings: Building[]
   public: PublicPlace[]
-  image_meta: { zoom: number; meters_per_px: number; tiles: number; span_m: number; size_px: number[] }
+  image_meta: { zoom: number; meters_per_px: number; tiles: number; span_m: number; size_px: number[]; projection?: Proj }
   warnings: string[]
   image_url: string
   image_id: string
@@ -151,6 +157,24 @@ export default function MirchakimScreen() {
   const [zoomOpen, setZoomOpen] = useState(false)
   const [radiusM, setRadiusM] = useState('')
 
+  // ── שכבת סימון: מבנים נבחרים + קווי מדידה ──
+  // מבנים לפי osm_id (יציב) ולא לפי אינדקס, וקווים ב-lat/lon ולא בפיקסלים —
+  // שינוי רדיוס מרנדר בזום ופריסה אחרים, ופיקסלים שמורים היו הופכים לשקר.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [measures, setMeasures] = useState<Measure[]>([])
+  const toggleBuilding = (id: string) => {
+    setSelectedIds(prev => {
+      const n = new Set(prev)
+      if (n.has(id)) n.delete(id); else n.add(id)
+      return n
+    })
+    setFormDirty(true)
+  }
+  const addMeasure = (m: { a: GeoPt; b: GeoPt }) => {
+    setMeasures(prev => [...prev, { ...m, id: rowId() }])
+    setFormDirty(true)
+  }
+
   // ── קלט שלישי: קואורדינטות מצילום מסך של Govmap ──
   // התמונה משמשת לחילוץ X/Y בלבד — היא לא נשמרת ולא הופכת לרקע הסקיצה.
   const [ocrBusy, setOcrBusy] = useState(false)
@@ -214,6 +238,9 @@ export default function MirchakimScreen() {
   const RADIUS_STEPS = [100, 150, 250, 400, 600, 900, 1200]
 
   async function run(overrideRadius?: number) {
+    // שינוי רדיוס (overrideRadius) שומר סימונים — אותו מיקום.
+    // חישוב חדש מהכפתור = מיקום אחר בפועל, ולכן מאפס.
+    if (overrideRadius === undefined) { setSelectedIds(new Set()); setMeasures([]) }
     setBusy(true); setErr(null); setRes(null); setSaveState('idle'); setSaveMsg('')
     try {
       const body: Record<string, string> = { label }
@@ -292,6 +319,14 @@ export default function MirchakimScreen() {
           id: rowId(), name: String(d.name ?? ''), distance_m: String(d.distance_m ?? ''),
         })))
       }
+      const savedSel = wc?.mirchakim?.selected_buildings
+      if (Array.isArray(savedSel)) setSelectedIds(new Set(savedSel.map(String)))
+      const savedMeas = wc?.mirchakim?.measures
+      if (Array.isArray(savedMeas)) {
+        setMeasures(savedMeas
+          .filter((m: Record<string, GeoPt>) => m?.a?.lat != null && m?.b?.lat != null)
+          .map((m: Record<string, GeoPt>) => ({ id: rowId(), a: m.a, b: m.b })))
+      }
       const pt = sheetRes.data?.progress_data?.asbestos_permit?.permit_type
       setPermitType(PERMIT_TYPES.some(t => t.key === pt) ? pt : DEFAULT_PERMIT_TYPE)
       setFormDirty(false)
@@ -340,6 +375,8 @@ export default function MirchakimScreen() {
       const mirchakim = {
         ...(wc.mirchakim ?? {}),
         distances: distRows.map(d => ({ name: d.name, distance_m: d.distance_m })),
+        selected_buildings: [...selectedIds],
+        measures: measures.map(m => ({ a: m.a, b: m.b })),
         image_id: res?.image_id ?? (wc.mirchakim?.image_id ?? null),
         radius_m: res ? radiusOf(res) : (wc.mirchakim?.radius_m ?? null),
         updated_at: new Date().toISOString(),
@@ -546,15 +583,33 @@ export default function MirchakimScreen() {
             {/* ── התמונה ── */}
             {res && (<>
             <div style={{ background: '#fff', padding: 12, marginTop: 10 }}>
-              <button type="button" onClick={() => setZoomOpen(true)}
-                style={{ display: 'block', width: '100%', padding: 0, border: 'none', background: 'none', cursor: 'zoom-in' }}
-                title="הגדל">
-                <img src={res.image_url} alt="תצלום אווירי עם מרחקים"
-                  style={{ width: '100%', borderRadius: 8, display: 'block' }} />
-              </button>
-              <div style={{ fontSize: 11.5, color: GREY, marginTop: 4, textAlign: 'center' }} className="no-print">
-                לחץ על התמונה להגדלה, זום וגרירה
+              {/* התמונה הקטנה + שכבה סטטית. ה-Lightbox הוא no-print, ולכן זו
+                  השכבה היחידה שמגיעה ל-PDF — היא קוראת בדיוק את אותו מצב
+                  שמור, ואינה ניתנת ללחיצה (כל העריכה ב-Lightbox). */}
+              <div style={{ position: 'relative' }}>
+                <button type="button" onClick={() => setZoomOpen(true)}
+                  style={{ display: 'block', width: '100%', padding: 0, border: 'none', background: 'none', cursor: 'zoom-in' }}
+                  title="הגדל">
+                  <img src={res.image_url} alt="תצלום אווירי עם מרחקים"
+                    style={{ width: '100%', borderRadius: 8, display: 'block' }} />
+                </button>
+                {res.image_meta.projection && (selectedIds.size > 0 || measures.length > 0) && (
+                  <SketchOverlay width={res.image_meta.size_px[0]} height={res.image_meta.size_px[1]}
+                    metersPerPx={res.image_meta.meters_per_px} proj={res.image_meta.projection}
+                    buildings={res.buildings} selected={selectedIds} measures={measures} />
+                )}
               </div>
+              <div style={{ fontSize: 11.5, color: GREY, marginTop: 4, textAlign: 'center' }} className="no-print">
+                לחץ על התמונה להגדלה — שם אפשר גם לסמן מבנים ולמדוד מרחקים
+              </div>
+              {(selectedIds.size > 0 || measures.length > 0) && (
+                <div style={{ fontSize: 12, color: '#1A3E7A', background: '#EEF2FF', borderRadius: 8,
+                  padding: '6px 10px', marginTop: 6, display: 'flex', gap: 10, flexWrap: 'wrap' }} className="no-print">
+                  {selectedIds.size > 0 && <span>🏠 {selectedIds.size} מבנים מסומנים</span>}
+                  {measures.length > 0 && <span>📏 {measures.length} קווי מדידה</span>}
+                  {!linkedMode && <span style={{ color: '#8A4B00' }}>· לא יישמר — קשר לעבודה כדי לשמור</span>}
+                </div>
+              )}
 
               {/* הרחבת התצוגה — בדיקה עינית שלא הוחמצו מבנים מחוץ לרדיוס.
                   מריץ מחדש את כל השליפה (Overpass + תצלום), לכן זו פעולה
@@ -896,7 +951,14 @@ export default function MirchakimScreen() {
         <div style={{ height: 24 }} />
       </div>
 
-      {zoomOpen && res && <Lightbox src={res.image_url} onClose={() => setZoomOpen(false)} />}
+      {zoomOpen && res && (
+        <Lightbox src={res.image_url} onClose={() => setZoomOpen(false)} res={res}
+          selected={selectedIds} measures={measures}
+          onToggle={toggleBuilding} onAddMeasure={addMeasure}
+          onUndo={() => { setMeasures(m => m.slice(0, -1)); setFormDirty(true) }}
+          onClearMeasures={() => { setMeasures([]); setFormDirty(true) }}
+          onClearSelection={() => { setSelectedIds(new Set()); setFormDirty(true) }} />
+      )}
     </div>
   )
 }
@@ -1068,7 +1130,30 @@ function AddBtn({ onClick, text }: { onClick: () => void; text: string }) {
 // ב-iOS ההתנהגות הנייטיבית בתוך div אינה עקבית. כאן pinch מחושב ידנית
 // ממרחק שתי האצבעות, ובנוסף יש גרירה, לחיצה כפולה, גלגלת וכפתורים —
 // כך שההתנהגות זהה בכל מכשיר.
-function Lightbox({ src, onClose }: { src: string; onClose: () => void }) {
+type LbMode = 'pan' | 'select' | 'measure'
+
+function Lightbox({ src, onClose, res, selected, measures, onToggle, onAddMeasure, onUndo, onClearMeasures, onClearSelection }: {
+  src: string; onClose: () => void
+  res: Result
+  selected: Set<string>
+  measures: Measure[]
+  onToggle: (id: string) => void
+  onAddMeasure: (m: { a: GeoPt; b: GeoPt }) => void
+  onUndo: () => void
+  onClearMeasures: () => void
+  onClearSelection: () => void
+}) {
+  // שלושה מצבים בלעדיים. 'pan' הוא ברירת המחדל ומשמר את ההתנהגות הקיימת
+  // במדויק — גרירה מזיזה, Escape סוגר — ולכן אין רגרסיה למי שלא נכנס
+  // לסימון בכלל.
+  const [mode, setMode] = useState<LbMode>('pan')
+  const [pending, setPending] = useState(false)
+  const [cancelSeq, setCancelSeq] = useState(0)      // מאלץ איפוס מדידה תלויה
+  const bumpCancel = () => setCancelSeq(n => n + 1)
+  const modeRef = useRef<LbMode>('pan'); modeRef.current = mode
+  const pendingRef = useRef(false); pendingRef.current = pending
+  const proj = res.image_meta.projection
+  const [iw, ih] = res.image_meta.size_px
   const [z, setZ] = useState(1)
   const [tx, setTx] = useState(0)
   const [ty, setTy] = useState(0)
@@ -1096,13 +1181,19 @@ function Lightbox({ src, onClose }: { src: string; onClose: () => void }) {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { onClose(); return }
+      if (e.key === 'Escape') {
+        // מהפנימי לחיצוני: מדידה תלויה → יציאה ממצב → סגירה
+        if (pendingRef.current) { setPending(false); bumpCancel(); return }
+        if (modeRef.current !== 'pan') { setMode('pan'); return }
+        onClose(); return
+      }
       if (e.key === '+' || e.key === '=') { e.preventDefault(); zoomToRef.current(zRef.current * 1.5) }
       else if (e.key === '-' || e.key === '_') { e.preventDefault(); zoomToRef.current(zRef.current / 1.5) }
       else if (e.key === '0') { e.preventDefault(); zoomToRef.current(1) }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onClose])
 
   // גלגלת וצביטה נרשמים כמאזינים נייטיביים ולא כ-props של React: React
@@ -1149,8 +1240,8 @@ function Lightbox({ src, onClose }: { src: string; onClose: () => void }) {
                display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
                touchAction: 'none', overscrollBehavior: 'contain' }}
       ref={boxRef}
-      onDoubleClick={() => zoomTo(z !== 1 ? 1 : 3)}
-      onPointerDown={e => { if (z > 1) drag.current = { x: e.clientX, y: e.clientY, tx, ty } }}
+      onDoubleClick={() => { if (mode === 'pan') zoomTo(z !== 1 ? 1 : 3) }}
+      onPointerDown={e => { if (mode === 'pan' && z > 1) drag.current = { x: e.clientX, y: e.clientY, tx, ty } }}
       onPointerMove={e => {
         if (!drag.current) return
         setTx(drag.current.tx + (e.clientX - drag.current.x))
@@ -1158,10 +1249,22 @@ function Lightbox({ src, onClose }: { src: string; onClose: () => void }) {
       }}
       onPointerUp={() => { drag.current = null }}
     >
-      <img src={src} alt="תצלום אווירי — תצוגה מוגדלת" draggable={false}
-        style={{ maxWidth: '100%', maxHeight: '100%', transform: `translate(${tx}px, ${ty}px) scale(${z})`,
-                 transformOrigin: 'center center', transition: drag.current ? 'none' : 'transform 0.08s linear',
-                 cursor: z > 1 ? 'grab' : 'zoom-in', userSelect: 'none' }} />
+      {/* ה-transform עבר מהתמונה למכל, כדי שה-SVG יזוז ויתקרב יחד איתה
+          ויישאר מיושר פיקסל-לפיקסל בכל זום. */}
+      <div style={{ position: 'relative', display: 'inline-block', maxWidth: '100%', maxHeight: '100%',
+                    transform: `translate(${tx}px, ${ty}px) scale(${z})`, transformOrigin: 'center center',
+                    transition: drag.current ? 'none' : 'transform 0.08s linear' }}>
+        <img src={src} alt="תצלום אווירי — תצוגה מוגדלת" draggable={false}
+          style={{ display: 'block', maxWidth: '100%', maxHeight: '100%',
+                   cursor: mode === 'pan' ? (z > 1 ? 'grab' : 'zoom-in') : 'default', userSelect: 'none' }} />
+        {proj && (
+          <SketchOverlay key={cancelSeq} width={iw} height={ih}
+            metersPerPx={res.image_meta.meters_per_px} proj={proj}
+            buildings={res.buildings} selected={selected} measures={measures}
+            mode={mode} onToggle={onToggle} onAddMeasure={onAddMeasure}
+            onPendingChange={setPending} />
+        )}
+      </div>
 
       <div style={{ position: 'absolute', top: 12, left: 12, right: 12, display: 'flex',
                     alignItems: 'center', justifyContent: 'space-between', gap: 8, direction: 'rtl' }}>
@@ -1176,9 +1279,46 @@ function Lightbox({ src, onClose }: { src: string; onClose: () => void }) {
           <button type="button" onClick={() => zoomTo(1)} style={lbBtn}>איפוס</button>
         </div>
       </div>
-      <div style={{ position: 'absolute', bottom: 14, left: 0, right: 0, textAlign: 'center',
-                    color: 'rgba(255,255,255,0.75)', fontSize: 12 }}>
-        גלגלת או צביטה · + / − / 0 במקלדת · גרירה להזזה · לחיצה כפולה למעבר מהיר · טווח 0.25×–8×
+      {/* סרגל מצבים. רצועת רקע אטומה — המנוע צורב מקרא בתחתית התמונה,
+          וכפתורים שקופים מעליו היו בלתי קריאים. */}
+      <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, paddingTop: 10,
+                    background: 'linear-gradient(to top, rgba(0,0,0,0.92) 62%, rgba(0,0,0,0))' }}>
+      <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap',
+                    direction: 'rtl', padding: '0 12px 8px' }}>
+        {!proj && (
+          <span style={{ color: '#FCA5A5', fontSize: 12.5, fontWeight: 700 }}>
+            ⚠️ הסקיצה חושבה לפני עדכון השרת — הרץ חישוב מחדש כדי לסמן מבנים
+          </span>
+        )}
+        {proj && ([['pan', '🖐 ניווט'], ['select', '🏠 בחירת מבנים'], ['measure', '📏 מדוד מרחק']] as [LbMode, string][])
+          .map(([m, t]) => (
+          <button key={m} type="button" onClick={() => { setMode(m); setPending(false); bumpCancel() }}
+            style={{ ...lbBtn, background: mode === m ? '#2563EB' : 'rgba(255,255,255,0.14)',
+                     borderColor: mode === m ? '#2563EB' : 'rgba(255,255,255,0.3)', fontWeight: 800 }}>{t}</button>
+        ))}
+        {mode === 'select' && (
+          <>
+            <span style={{ color: '#fff', fontSize: 12.5, fontWeight: 700, alignSelf: 'center' }}>
+              {selected.size} מבנים נבחרו
+            </span>
+            {selected.size > 0 && (
+              <button type="button" onClick={onClearSelection} style={lbBtn}>נקה בחירה</button>
+            )}
+          </>
+        )}
+        {mode === 'measure' && measures.length > 0 && (
+          <>
+            <button type="button" onClick={onUndo} style={lbBtn}>↶ בטל קו אחרון</button>
+            <button type="button" onClick={onClearMeasures} style={lbBtn}>נקה הכל</button>
+          </>
+        )}
+      </div>
+
+      <div style={{ textAlign: 'center', color: 'rgba(255,255,255,0.75)', fontSize: 12, padding: '0 12px 12px' }}>
+        {mode === 'select' && 'לחץ על מבנה כדי לבחור · לחיצה נוספת מבטלת · Escape ליציאה'}
+        {mode === 'measure' && 'לחץ, גרור ושחרר כדי למדוד · Escape מבטל מדידה בתהליך'}
+        {mode === 'pan' && 'גלגלת או צביטה · + / − / 0 במקלדת · גרירה להזזה · לחיצה כפולה למעבר מהיר · טווח 0.25×–8×'}
+      </div>
       </div>
     </div>
   )
