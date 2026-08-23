@@ -18,6 +18,9 @@ const GREY = '#8696A0'
 // בסקיצה. Esri מגיש עם Access-Control-Allow-Origin: * ו-max-age=86400,
 // כך שגרירה חזרה לאזור שכבר נראה לא עולה בקשה נוספת.
 const TILES = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
+// שכבת תוויות שקופה של Esri — שמות רחובות, בעברית ובתעתיק. זו השכבה
+// המשלימה הרשמית ל-World Imagery ("hybrid"), ולכן היא מיושרת אליה בדיוק.
+const LABELS = 'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}'
 const ATTRIB = 'Esri World Imagery'
 
 export interface PickedPoint { lat: number; lon: number }
@@ -46,12 +49,17 @@ export default function LocationPicker({ lat, lon, radiusM, label, onConfirm, on
       maxBounds: bounds, maxBoundsViscosity: 1.0,
       zoomControl: true, attributionControl: true,
     })
-    L.tileLayer(TILES, {
-      maxZoom: 19, attribution: ATTRIB,
+    const tileOpts = {
+      maxZoom: 19,
       keepBuffer: 1,              // ברירת המחדל 2 מכפילה את מספר האריחים
       updateWhenIdle: true,       // לא טוען תוך כדי גרירה, רק כשהאצבע עוזבת
       updateWhenZooming: false,
-    }).addTo(map)
+    }
+    L.tileLayer(TILES, { ...tileOpts, attribution: ATTRIB }).addTo(map)
+    // שמות הרחובות מעל התצלום. מכפיל את מספר האריחים (~20 → ~40 לסשן),
+    // וזה עדיין פחות מפעמיים analyze בודד — שווה את זה כדי לדעת שאתה
+    // על הרחוב הנכון לפני שמקבעים.
+    L.tileLayer(LABELS, { ...tileOpts, opacity: 0.95, pane: 'overlayPane' }).addTo(map)
 
     circleRef.current = L.circle(start, {
       radius: radiusM, color: '#FFD600', weight: 2, fill: false, interactive: false,
