@@ -55,3 +55,8 @@ body {
   .no-scrollbar { overflow: visible !important; height: auto !important; }
   img { max-width: 100% !important; page-break-inside: avoid; }
 }
+
+/* טקסט רמז בשדות קלט — בהיר מספיק כדי שלא ייקרא כערך שהוקלד.
+   ברירת המחדל של iOS כהה מדי, ומשתמש חשב ששדות ITM מלאים כשהיו ריקים. */
+.ph-faint::placeholder { color: #B9C2CA; opacity: 1; }
+.ph-faint::-webkit-input-placeholder { color: #B9C2CA; }

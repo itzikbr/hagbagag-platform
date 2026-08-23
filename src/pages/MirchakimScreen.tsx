@@ -488,8 +488,10 @@ export default function MirchakimScreen() {
           {method === 'itm' ? (
             <>
               <div style={{ display: 'flex', gap: 8 }}>
-                <Field label="X (מזרח)"><Inp value={itmX} onChange={setItmX} placeholder="181157" dir="ltr" /></Field>
-                <Field label="Y (צפון)"><Inp value={itmY} onChange={setItmY} placeholder="672380" dir="ltr" /></Field>
+                <Field label="X (מזרח)"><Inp value={itmX} onChange={setItmX} placeholder="לדוגמה 181157" dir="ltr"
+                  invalid={!!err && !itmX.trim()} /></Field>
+                <Field label="Y (צפון)"><Inp value={itmY} onChange={setItmY} placeholder="לדוגמה 672380" dir="ltr"
+                  invalid={!!err && !itmY.trim()} /></Field>
               </div>
               <div style={{ fontSize: 11.5, color: GREY, marginTop: 4 }}>
                 העתק מתחתית מסך Govmap — X ואחריו Y.
@@ -529,7 +531,7 @@ export default function MirchakimScreen() {
               <Field label="שם / תיאור (לא חובה)"><Inp value={label} onChange={setLabel} placeholder="למשל: מחסן אסבסט מזרחי" /></Field>
             </div>
             <div style={{ flex: 1 }}>
-              <Field label="רדיוס (מ׳)"><Inp value={radiusM} onChange={setRadiusM} placeholder="100" dir="ltr" /></Field>
+              <Field label="רדיוס (מ׳)"><Inp value={radiusM} onChange={setRadiusM} placeholder="ברירת מחדל 100" dir="ltr" /></Field>
             </div>
           </div>
 
@@ -1356,9 +1358,15 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     </div>
   )
 }
-function Inp({ value, onChange, placeholder, dir }: { value: string; onChange: (v: string) => void; placeholder?: string; dir?: string }) {
+function Inp({ value, onChange, placeholder, dir, invalid }: {
+  value: string; onChange: (v: string) => void; placeholder?: string; dir?: string; invalid?: boolean
+}) {
+  // ה-placeholder צבוע מפורשות בהיר מאוד: ברירת המחדל של iOS קרובה מדי
+  // לטקסט אמיתי, ומשתמש חשב ששדות ה-ITM מלאים בזמן שהם היו ריקים.
   return <input value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} dir={dir}
-    style={{ width: '100%', boxSizing: 'border-box', padding: '9px 10px', border: `1px solid ${BORDER}`,
+    className="ph-faint"
+    style={{ width: '100%', boxSizing: 'border-box', padding: '9px 10px',
+      border: `1px solid ${invalid ? '#E0708A' : BORDER}`, background: invalid ? '#FDECEC' : '#fff',
       borderRadius: 8, fontSize: 14.5, fontFamily: 'inherit' }} />
 }
 function Section({ title, badge, children, action }: { title: string; badge?: string; children: React.ReactNode; action?: React.ReactNode }) {
