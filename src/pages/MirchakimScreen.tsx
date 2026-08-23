@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import SketchOverlay, { type Measure, type Proj, type GeoPt } from '../components/SketchOverlay'
+import LocationPicker, { type PickedPoint } from '../components/LocationPicker'
 import {
   PERMIT_TYPES, PERMIT_INFO, DEFAULT_PERMIT_TYPE, permitDef, permitTiming,
   classifyBuilding, classColors, labTestsLabel, toNum, ASB_FORM_OPTS,
@@ -193,6 +194,9 @@ export default function MirchakimScreen() {
   // ── קלט שלישי: קואורדינטות מצילום מסך של Govmap ──
   // התמונה משמשת לחילוץ X/Y בלבד — היא לא נשמרת ולא הופכת לרקע הסקיצה.
   const [geoCands, setGeoCands] = useState<GeoCand[] | null>(null)
+  // המפה היא שלב אישור בין הקלט לחישוב. כל שלוש הלשוניות מייצרות נקודת
+  // פתיחה, והמשתמש מכייל אותה ויזואלית לפני שמשלמים 40-200 שניות רינדור.
+  const [pickAt, setPickAt] = useState<{ lat: number; lon: number; label: string | null } | null>(null)
   const [ocrBusy, setOcrBusy] = useState(false)
   const [ocrMsg, setOcrMsg] = useState<{ ok: boolean; text: string } | null>(null)
   const shotInput = useRef<HTMLInputElement>(null)
@@ -253,7 +257,30 @@ export default function MirchakimScreen() {
   // מדרג ההרחבה. כל הכפלה מרבעת את מספר האריחים, לכן צעדים ולא רציף.
   const RADIUS_STEPS = [100, 150, 250, 400, 600, 900, 1200]
 
-  /** מסלול הכתובת: קודם מועמדים, בחירה מפורשת, ורק אז חישוב. */
+  function openPicker(la: number, lo: number) {
+    setPickAt({ lat: la, lon: lo, label: label.trim() || address.trim() || null })
+  }
+
+  /** ITM → lat/lon בשרת. ההיטל נשאר במקום אחד. */
+  async function startFromItm() {
+    setBusy(true); setErr(null)
+    try {
+      if (!itmX.trim() || !itmY.trim()) throw new Error('הזן גם X וגם Y מתחתית Govmap.')
+      const r = await fetch(`${API}/to-latlon`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ itm_x: itmX.trim(), itm_y: itmY.trim() }),
+      })
+      const d = await r.json().catch(() => null)
+      if (!r.ok) throw new Error(d?.error || `השרת החזיר שגיאה ${r.status}`)
+      openPicker(d.lat, d.lon)
+    } catch (e) {
+      const m = e instanceof Error ? e.message : String(e)
+      setErr({ message: m.includes('Failed to fetch')
+        ? 'לא הצלחנו להגיע לשרת. ודא חיבור אינטרנט ונסה שוב.' : m })
+    } finally { setBusy(false) }
+  }
+
+  /** מסלול הכתובת: קודם מועמדים, בחירה מפורשת, ורק אז מפה. */
   async function findAddress() {
     setBusy(true); setErr(null); setGeoCands(null)
     try {
@@ -266,7 +293,7 @@ export default function MirchakimScreen() {
       if (!r.ok) throw new Error(d?.error || `השרת החזיר שגיאה ${r.status}`)
       const cands: GeoCand[] = d.candidates ?? []
       // רק התאמה מדויקת ויחידה ממשיכה לבד. כל השאר — המשתמש מכריע.
-      if (cands.length === 1 && cands[0].exact) { void run(undefined, cands[0]); return }
+      if (cands.length === 1 && cands[0].exact) { openPicker(cands[0].lat, cands[0].lon); return }
       setGeoCands(cands)
     } catch (e) {
       const m = e instanceof Error ? e.message : String(e)
@@ -275,7 +302,7 @@ export default function MirchakimScreen() {
     } finally { setBusy(false) }
   }
 
-  async function run(overrideRadius?: number, point?: GeoCand) {
+  async function run(overrideRadius?: number, point?: { lat: number; lon: number }) {
     // שינוי רדיוס (overrideRadius) שומר סימונים — אותו מיקום.
     // חישוב חדש מהכפתור = מיקום אחר בפועל, ולכן מאפס.
     if (overrideRadius === undefined) { setSelectedIds(new Set()); setMeasures([]) }
@@ -590,11 +617,11 @@ export default function MirchakimScreen() {
             )
           })()}
 
-          <button type="button" onClick={() => void (method === 'address' ? findAddress() : run())} disabled={busy}
+          <button type="button" onClick={() => void (method === 'address' ? findAddress() : startFromItm())} disabled={busy}
             style={{ width: '100%', marginTop: 12, padding: '12px 0', borderRadius: 24, border: 'none',
               background: busy ? '#bbb' : RED, color: '#fff', fontSize: 15.5, fontWeight: 700,
               cursor: busy ? 'default' : 'pointer', fontFamily: 'inherit' }}>
-            {busy ? 'מחשב… (עד דקה)' : 'חשב מרחקים למבנים סמוכים'}
+            {busy ? 'מחשב… (עד דקה)' : method === 'address' ? 'אתר כתובת' : 'המשך למפה'}
           </button>
         </div>
 
@@ -618,7 +645,7 @@ export default function MirchakimScreen() {
             </div>
             {geoCands.map((c, i) => (
               <button key={i} type="button"
-                onClick={() => { setGeoCands(null); void run(undefined, c) }}
+                onClick={() => { setGeoCands(null); openPicker(c.lat, c.lon) }}
                 style={{ display: 'block', width: '100%', textAlign: 'right', padding: '10px 12px',
                   border: 'none', borderBottom: '1px solid #F0F2F5', background: 'none',
                   cursor: 'pointer', fontFamily: 'inherit', direction: 'rtl' }}>
@@ -934,8 +961,18 @@ export default function MirchakimScreen() {
             {res && (
             <div className="no-print">
             <Section title={`מבני ציבור (גני ילדים / בתי ספר) — ${res.public_radius_m ?? 200} מ׳`} badge={String(res.public.length)}>
+              {/* הניסוח כאן נזהר בכוונה. השכבה היא נתוני 2013–2014 ומכסה 298
+                  יישובים בגני ילדים ו-174 בבתי ספר — בעיקר ערים. בקיבוצים
+                  ובמושבים היא כמעט ריקה (עין החורש: 0 ברדיוס 2 ק״מ). "אין גן
+                  ברדיוס 200 מ׳" הייתה קביעה שאין לה בסיס, ועל סף רגולטורי
+                  שכזה טעות כזו נכנסת להגשה. */}
+              <div style={{ padding: '8px 12px', fontSize: 11.5, color: '#7a5b00', background: '#FFF8E6',
+                borderBottom: '1px solid #F0D98C', lineHeight: 1.55 }}>
+                ⚠️ המאגר הוא נתוני 2013–2014 בכיסוי חלקי — טוב בערים, דל ביישובים כפריים.
+                אין להסתמך עליו לבדו; <b>אימות בשטח נדרש</b>.
+              </div>
               {res.public.length === 0
-                ? <Empty text={`אין גן ילדים או בית ספר ברדיוס ${res.public_radius_m ?? 200} מ׳ מהנקודה.`} />
+                ? <Empty text={`לא נמצא גן ילדים או בית ספר ברדיוס ${res.public_radius_m ?? 200} מ׳ במאגר. זה אינו אישור שאין כאלה בשטח.`} />
                 : res.public.map((p, i) => (
                   <Row key={i}>
                     <span><b>{p.name}</b> <span style={{ color: GREY, fontSize: 12 }}>· {p.kind}</span></span>
@@ -1037,6 +1074,12 @@ export default function MirchakimScreen() {
         <div style={{ height: 24 }} />
       </div>
 
+      {pickAt && (
+        <LocationPicker lat={pickAt.lat} lon={pickAt.lon} label={pickAt.label}
+          radiusM={radiusM.trim() ? Number(radiusM.trim()) || 100 : 100}
+          onCancel={() => setPickAt(null)}
+          onConfirm={(p: PickedPoint) => { setPickAt(null); void run(undefined, p) }} />
+      )}
       {zoomOpen && res && (
         <Lightbox src={res.image_url} onClose={() => setZoomOpen(false)} res={res}
           selected={selectedIds} measures={measures}
