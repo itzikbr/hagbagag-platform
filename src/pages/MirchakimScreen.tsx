@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import SketchOverlay, { type Measure, type Proj, type GeoPt } from '../components/SketchOverlay'
+import SketchOverlay, { measureMeters, type Measure, type Proj, type GeoPt } from '../components/SketchOverlay'
 import LocationPicker, { type PickedPoint } from '../components/LocationPicker'
 import {
   PERMIT_TYPES, PERMIT_INFO, DEFAULT_PERMIT_TYPE, permitDef, permitTiming,
@@ -187,7 +187,13 @@ export default function MirchakimScreen() {
     setFormDirty(true)
   }
   const addMeasure = (m: { a: GeoPt; b: GeoPt }) => {
-    setMeasures(prev => [...prev, { ...m, id: rowId() }])
+    // כל קו נפתח כשורה בטבלה עם שם גנרי הניתן לעריכה. הקו והשורה הם
+    // אותו אובייקט — מחיקת שורה מוחקת את הקו מהסקיצה, ולהיפך.
+    setMeasures(prev => [...prev, { ...m, id: rowId(), name: `מבנה ${prev.length + 1}` }])
+    setFormDirty(true)
+  }
+  const patchMeasure = (id: string, p: Partial<Measure>) => {
+    setMeasures(rs => rs.map(r => (r.id === id ? { ...r, ...p } : r)))
     setFormDirty(true)
   }
 
@@ -392,7 +398,10 @@ export default function MirchakimScreen() {
       if (Array.isArray(savedMeas)) {
         setMeasures(savedMeas
           .filter((m: Record<string, GeoPt>) => m?.a?.lat != null && m?.b?.lat != null)
-          .map((m: Record<string, GeoPt>) => ({ id: rowId(), a: m.a, b: m.b })))
+          .map((m: Record<string, unknown>, i: number) => ({
+            id: rowId(), a: m.a as GeoPt, b: m.b as GeoPt,
+            name: String(m.name || `מבנה ${i + 1}`),
+          })))
       }
       const pt = sheetRes.data?.progress_data?.asbestos_permit?.permit_type
       setPermitType(PERMIT_TYPES.some(t => t.key === pt) ? pt : DEFAULT_PERMIT_TYPE)
@@ -407,15 +416,10 @@ export default function MirchakimScreen() {
     return () => { cancelled = true }
   }, [sheetId])
 
-  // טבלת המרחקים נזרעת מתוצאת המנוע, ומכאן והלאה ניתנת לעריכה ידנית.
-  useEffect(() => {
-    if (!res) return
-    setDistRows(res.buildings.map((b, i) => ({
-      id: rowId(),
-      name: b.name?.trim() || `מבנה ללא שם ב-OSM #${i + 1}`,
-      distance_m: String(b.distance_m),
-    })))
-  }, [res])
+  // אין יותר זריעה אוטומטית מ-OSM. המרחקים שנכנסים להיתר הם הקווים
+  // שסומנו ידנית על התצלום; רשימת OSM הייתה מוסיפה עשרות שורות ממקור
+  // שכבר הוכח כלא אמין (כיסוי חלקי, מבנים חסרים). מה שהמנוע כן מצא
+  // מוצג בכתובית על הסקיצה ובמונה שליד כותרת הטבלה.
 
   /** שמירת סוג ההיתר + טבלת המבנים לדף ביצוע. read-modify-write על
    *  work_content כדי לא לדרוס לשוניות אחרות של אותו דף. */
@@ -443,7 +447,7 @@ export default function MirchakimScreen() {
         ...(wc.mirchakim ?? {}),
         distances: distRows.map(d => ({ name: d.name, distance_m: d.distance_m })),
         selected_buildings: [...selectedIds],
-        measures: measures.map(m => ({ a: m.a, b: m.b })),
+        measures: measures.map(m => ({ a: m.a, b: m.b, name: m.name ?? '' })),
         image_id: res?.image_id ?? (wc.mirchakim?.image_id ?? null),
         radius_m: res ? radiusOf(res) : (wc.mirchakim?.radius_m ?? null),
         updated_at: new Date().toISOString(),
@@ -896,25 +900,13 @@ export default function MirchakimScreen() {
               </div>
             </Section>
 
-            {/* ── טבלה 2: מרחקים ממבנים אחרים (מוסתרת כשאין) ── */}
-            {distRows.length > 0 && (
-              <Section title="מרחקים ממבנים אחרים" badge={String(distRows.length)}
+            {/* ── טבלה 2: מרחקים ממבנים אחרים ──
+                השורות הן הקווים שסומנו ידנית על התצלום: קו = שורה, אותו
+                מספר בשניהם, ומחיקה בטבלה מוחקת את הקו. שם גנרי ניתן לעריכה.
+                שורה ידנית ("+ הוסף מבנה סמוך") למי שמדד בשטח בלי לצייר קו. */}
+            {(measures.length > 0 || distRows.length > 0) && (
+              <Section title="מרחקים ממבנים אחרים" badge={String(measures.length + distRows.length)}
                 action={<EditToggle on={editDist} onClick={() => setEditDist(!editDist)} />}>
-                {res && (
-                  <div style={{ padding: '8px 12px', fontSize: 12.5, color: '#555', lineHeight: 1.6, borderBottom: '1px solid #F6F4F2' }} className="no-print">
-                    <div>
-                      <span style={{ display: 'inline-block', width: 11, height: 11, background: '#FFBE00',
-                                     border: '2px solid #FFAA00', borderRadius: 2, marginLeft: 5 }} />
-                      {res.subject ? 'המבנה המדובר מסומן בענבר בתמונה' : 'המבנה המדובר לא זוהה — ראה אזהרה'}
-                    </div>
-                    <div><b>{res.drawn_count ?? 0}</b> מבנים מסומנים בקו מרחק בתמונה (הקרוב ביותר, הקרוב בכל כיוון, הקרוב בכל טווח).</div>
-                    {res.empty_directions && res.empty_directions.length > 0 && (
-                      <div style={{ color: '#1A5A2A', fontWeight: 700 }}>
-                        אין מבנים כלל בכיוון: {res.empty_directions.join(', ')}
-                      </div>
-                    )}
-                  </div>
-                )}
                 <div className="tbl-scroll" style={{ overflowX: 'auto' }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse', direction: 'rtl' }}>
                     <thead>
@@ -926,9 +918,26 @@ export default function MirchakimScreen() {
                       </tr>
                     </thead>
                     <tbody>
+                      {measures.map((m, i) => (
+                        <tr key={m.id}>
+                          <td style={{ ...td, fontWeight: 800 }}>{i + 1}</td>
+                          <td style={{ ...td, whiteSpace: 'normal' }}>{editDist
+                            ? <CellInp value={m.name ?? ''} onChange={v => patchMeasure(m.id, { name: v })} />
+                            : (m.name || <span style={{ color: GREY }}>—</span>)}</td>
+                          <td style={{ ...td, fontVariantNumeric: 'tabular-nums', fontWeight: 700 }}>
+                            {measureMeters(m.a, m.b).toFixed(1)}
+                          </td>
+                          {editDist && (
+                            <td style={td} className="no-print">
+                              <DelBtn title={`מחק קו ${i + 1}`}
+                                onClick={() => { setMeasures(rs => rs.filter(x => x.id !== m.id)); setFormDirty(true) }} />
+                            </td>
+                          )}
+                        </tr>
+                      ))}
                       {distRows.map((d, i) => (
                         <tr key={d.id}>
-                          <td style={{ ...td, fontWeight: 800 }}>{i + 1}</td>
+                          <td style={{ ...td, fontWeight: 800 }}>{measures.length + i + 1}</td>
                           <td style={{ ...td, whiteSpace: 'normal' }}>{editDist
                             ? <CellInp value={d.name} onChange={v => patchDist(d.id, { name: v })} />
                             : (d.name || <span style={{ color: GREY }}>—</span>)}</td>
@@ -937,7 +946,7 @@ export default function MirchakimScreen() {
                             : d.distance_m}</td>
                           {editDist && (
                             <td style={td} className="no-print">
-                              <DelBtn title={`מחק שורה ${i + 1}`}
+                              <DelBtn title={`מחק שורה ${measures.length + i + 1}`}
                                 onClick={() => { setDistRows(rs => rs.filter(x => x.id !== d.id)); setFormDirty(true) }} />
                             </td>
                           )}
@@ -948,21 +957,27 @@ export default function MirchakimScreen() {
                 </div>
                 {editDist && (
                   <div style={{ padding: '0 12px 12px' }}>
-                    <AddBtn text="+ הוסף מבנה סמוך"
-                      onClick={() => { setDistRows(rs => [...rs, { id: rowId(), name: '', distance_m: '' }]); setFormDirty(true) }} />
+                    <AddBtn text="+ הוסף מבנה סמוך (בלי קו)"
+                      onClick={() => { setDistRows(rs => [...rs, { id: rowId(), name: `מבנה ${measures.length + rs.length + 1}`, distance_m: '' }]); setFormDirty(true) }} />
                   </div>
                 )}
+                <div style={{ padding: '6px 12px 10px', fontSize: 11.5, color: GREY, lineHeight: 1.5 }} className="no-print">
+                  כל קו שתסמן על התצלום נפתח כאן כשורה, עם אותו מספר. השם ניתן לעריכה
+                  דרך "✏️ ערוך".
+                  {res && ` המנוע מצא ${res.buildings.length} מבנים ב-OSM ברדיוס ${radiusOf(res)} מ׳ — לידיעה בלבד, לא נכנסים לטבלה.`}
+                </div>
               </Section>
             )}
 
-            {/* אין מבנים סמוכים — נאמר במפורש, לא נעלם בשקט */}
-            {res && distRows.length === 0 && (
+            {/* עוד לא סומנו קווים — הנחיה, לא שגיאה */}
+            {res && measures.length === 0 && distRows.length === 0 && (
               <div style={{ margin: '10px 14px', padding: '9px 11px', background: '#EEF2FF',
                 border: '1px solid #C7D2FE', borderRadius: 8, fontSize: 12.5, color: '#1A3E7A', lineHeight: 1.5 }} className="no-print">
-                לא נמצאו מבנים סמוכים ברדיוס {radiusOf(res)} מ׳ — טבלת המרחקים אינה מוצגת ולא תודפס.
-                באזורים כפריים מאגר OSM לעיתים ריק; ניתן להוסיף שורות ידנית דרך "✏️ ערוך" אחרי הוספת מבנה ראשון.
+                📏 עוד לא סומנו מרחקים. לחץ על התצלום ← <b>מדוד מרחק</b>, וכל קו שתמתח ייפתח
+                כאן כשורה בטבלה.
               </div>
             )}
+
 
             {/* ── מבני ציבור (לא נכנס להדפסה לפי המפרט) ── */}
             {res && (

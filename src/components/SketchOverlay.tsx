@@ -11,7 +11,18 @@
 import { useRef, useState } from 'react'
 
 export interface GeoPt { lat: number; lon: number }
-export interface Measure { id: string; a: GeoPt; b: GeoPt }
+export interface Measure { id: string; a: GeoPt; b: GeoPt; name?: string }
+
+/** מרחק קרקע אמיתי בין שתי נקודות. משמש גם בתווית על הסקיצה וגם בטבלה,
+ *  כדי ששני המקומות יראו בדיוק את אותו מספר. גיאודזי ולא פיקסלים×קנה-מידה:
+ *  מדויק יותר, ולא תלוי ברינדור הנוכחי. */
+export function measureMeters(a: GeoPt, b: GeoPt): number {
+  const R = 6371000, rad = Math.PI / 180
+  const la1 = a.lat * rad, la2 = b.lat * rad
+  const dla = (b.lat - a.lat) * rad, dlo = (b.lon - a.lon) * rad
+  const h = Math.sin(dla / 2) ** 2 + Math.cos(la1) * Math.cos(la2) * Math.sin(dlo / 2) ** 2
+  return 2 * R * Math.asin(Math.sqrt(h))
+}
 export interface Proj {
   center_px: [number, number]
   center_lat: number; center_lon: number
@@ -73,8 +84,8 @@ export function distToPoly(x: number, y: number, poly: number[][]): number {
 }
 
 /** תווית מרחק באמצע הקו, מסובבת בזווית הקו ובלי להתהפך. */
-function MeasureLabel({ ax, ay, bx, by, text, s }: {
-  ax: number; ay: number; bx: number; by: number; text: string; s: number
+function MeasureLabel({ ax, ay, bx, by, text, s, n }: {
+  ax: number; ay: number; bx: number; by: number; text: string; s: number; n?: number
 }) {
   const mx = (ax + bx) / 2, my = (ay + by) / 2
   let ang = (Math.atan2(by - ay, bx - ax) * 180) / Math.PI
@@ -82,7 +93,8 @@ function MeasureLabel({ ax, ay, bx, by, text, s }: {
   if (ang < -90) ang += 180
   // הוגדל: אלה התוויות היחידות שנשארו אחרי שקווי המרחק של המנוע כובו,
   // והן צריכות להיקרא גם בהקטנה ל-A4.
-  const w = text.length * 12 * s + 18 * s
+  const full = n ? `${n} · ${text}` : text
+  const w = full.length * 12 * s + 18 * s
   const h = 28 * s
   return (
     <g transform={`translate(${mx} ${my}) rotate(${ang})`}>
@@ -90,7 +102,7 @@ function MeasureLabel({ ax, ay, bx, by, text, s }: {
         fill="rgba(255,255,255,0.93)" stroke={MEAS} strokeWidth={1.4 * s} />
       <text x={0} y={0} textAnchor="middle" dominantBaseline="central"
         fontSize={18 * s} fontWeight={800} fill="#1E3A8A"
-        fontFamily="system-ui, -apple-system, sans-serif">{text}</text>
+        fontFamily="system-ui, -apple-system, sans-serif">{full}</text>
     </g>
   )
 }
@@ -177,8 +189,7 @@ export default function SketchOverlay({
   }
 
   const candSet = new Set(cands?.ids ?? [])
-  const mLen = (ax: number, ay: number, bx: number, by: number) =>
-    `${(Math.hypot(bx - ax, by - ay) * metersPerPx).toFixed(1)} מ׳`
+  const geoLen = (g1: GeoPt, g2: GeoPt) => `${measureMeters(g1, g2).toFixed(1)} מ׳`
 
   return (
     <>
@@ -206,14 +217,14 @@ export default function SketchOverlay({
           )
         })}
 
-        {measures.map(m => {
+        {measures.map((m, i) => {
           const [ax, ay] = P.toPx(m.a), [bx, by] = P.toPx(m.b)
           return (
             <g key={m.id}>
               <line x1={ax} y1={ay} x2={bx} y2={by} stroke={MEAS} strokeWidth={2.5 * s} strokeLinecap="round" />
               <circle cx={ax} cy={ay} r={3.5 * s} fill={MEAS} stroke="#fff" strokeWidth={1.2 * s} />
               <circle cx={bx} cy={by} r={3.5 * s} fill={MEAS} stroke="#fff" strokeWidth={1.2 * s} />
-              <MeasureLabel ax={ax} ay={ay} bx={bx} by={by} s={s} text={mLen(ax, ay, bx, by)} />
+              <MeasureLabel ax={ax} ay={ay} bx={bx} by={by} s={s} n={i + 1} text={geoLen(m.a, m.b)} />
             </g>
           )
         })}
@@ -224,7 +235,8 @@ export default function SketchOverlay({
               stroke={MEAS} strokeWidth={2.5 * s} strokeDasharray={`${7 * s} ${5 * s}`} strokeLinecap="round" />
             <circle cx={drag.a[0]} cy={drag.a[1]} r={3.5 * s} fill={MEAS} stroke="#fff" strokeWidth={1.2 * s} />
             <MeasureLabel ax={drag.a[0]} ay={drag.a[1]} bx={drag.b[0]} by={drag.b[1]} s={s}
-              text={mLen(drag.a[0], drag.a[1], drag.b[0], drag.b[1])} />
+              n={measures.length + 1}
+              text={geoLen(P.toGeo(drag.a[0], drag.a[1]), P.toGeo(drag.b[0], drag.b[1]))} />
           </g>
         )}
       </svg>
