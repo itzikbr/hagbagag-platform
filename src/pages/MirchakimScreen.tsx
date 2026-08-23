@@ -53,6 +53,21 @@ interface Result {
 }
 interface SheetOpt { id: string; project_name: string; order_number: string | null }
 
+// מועמד גיאוקודינג. הכלי לא בוחר לבד: Nominatim מחזיר לכתובת עם מספר בית
+// את הרחוב בלבד (addresstype=road, בלי house_number), ולשם יישוב הוא מחזיר
+// גם רחובות באותו שם בערים אחרות. בחירה עיוורת ב-hits[0] הניחה סקיצה
+// בנקודה שרירותית — ובמקרה הגרוע בעיר אחרת לגמרי.
+interface GeoCand {
+  display_name: string
+  lat: number; lon: number
+  itm: number[]
+  precision: string
+  precision_note: string
+  exact: boolean
+  city: string | null
+  house_number: string | null
+}
+
 // רשימת סוגי המבנה — זהה לרשימה הסגורה ב-NewExecutionSheet. מכוון: הערך
 // 'סככה פתוחה' הוא תנאי בשתי תבניות סיווג, ולכן חייב להישאר ערך מוכר
 // ולא טקסט חופשי.
@@ -177,6 +192,7 @@ export default function MirchakimScreen() {
 
   // ── קלט שלישי: קואורדינטות מצילום מסך של Govmap ──
   // התמונה משמשת לחילוץ X/Y בלבד — היא לא נשמרת ולא הופכת לרקע הסקיצה.
+  const [geoCands, setGeoCands] = useState<GeoCand[] | null>(null)
   const [ocrBusy, setOcrBusy] = useState(false)
   const [ocrMsg, setOcrMsg] = useState<{ ok: boolean; text: string } | null>(null)
   const shotInput = useRef<HTMLInputElement>(null)
@@ -237,7 +253,29 @@ export default function MirchakimScreen() {
   // מדרג ההרחבה. כל הכפלה מרבעת את מספר האריחים, לכן צעדים ולא רציף.
   const RADIUS_STEPS = [100, 150, 250, 400, 600, 900, 1200]
 
-  async function run(overrideRadius?: number) {
+  /** מסלול הכתובת: קודם מועמדים, בחירה מפורשת, ורק אז חישוב. */
+  async function findAddress() {
+    setBusy(true); setErr(null); setGeoCands(null)
+    try {
+      if (!address.trim()) throw new Error('הזן כתובת.')
+      const r = await fetch(`${API}/geocode`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ address: address.trim() }),
+      })
+      const d = await r.json().catch(() => null)
+      if (!r.ok) throw new Error(d?.error || `השרת החזיר שגיאה ${r.status}`)
+      const cands: GeoCand[] = d.candidates ?? []
+      // רק התאמה מדויקת ויחידה ממשיכה לבד. כל השאר — המשתמש מכריע.
+      if (cands.length === 1 && cands[0].exact) { void run(undefined, cands[0]); return }
+      setGeoCands(cands)
+    } catch (e) {
+      const m = e instanceof Error ? e.message : String(e)
+      setErr({ message: m.includes('Failed to fetch')
+        ? 'לא הצלחנו להגיע לשרת. ודא חיבור אינטרנט ונסה שוב.' : m })
+    } finally { setBusy(false) }
+  }
+
+  async function run(overrideRadius?: number, point?: GeoCand) {
     // שינוי רדיוס (overrideRadius) שומר סימונים — אותו מיקום.
     // חישוב חדש מהכפתור = מיקום אחר בפועל, ולכן מאפס.
     if (overrideRadius === undefined) { setSelectedIds(new Set()); setMeasures([]) }
@@ -246,7 +284,9 @@ export default function MirchakimScreen() {
       const body: Record<string, string> = { label }
       const rad = overrideRadius ?? (radiusM.trim() ? Number(radiusM.trim()) : null)
       if (rad && Number.isFinite(rad)) body.radius_m = String(Math.round(rad))
-      if (method === 'itm') {
+      if (point) {
+        body.lat = String(point.lat); body.lon = String(point.lon)
+      } else if (method === 'itm') {
         if (!itmX.trim() || !itmY.trim()) throw new Error('הזן גם X וגם Y מתחתית Govmap.')
         body.itm_x = itmX.trim(); body.itm_y = itmY.trim()
       } else {
@@ -550,13 +590,57 @@ export default function MirchakimScreen() {
             )
           })()}
 
-          <button type="button" onClick={() => void run()} disabled={busy}
+          <button type="button" onClick={() => void (method === 'address' ? findAddress() : run())} disabled={busy}
             style={{ width: '100%', marginTop: 12, padding: '12px 0', borderRadius: 24, border: 'none',
               background: busy ? '#bbb' : RED, color: '#fff', fontSize: 15.5, fontWeight: 700,
               cursor: busy ? 'default' : 'pointer', fontFamily: 'inherit' }}>
             {busy ? 'מחשב… (עד דקה)' : 'חשב מרחקים למבנים סמוכים'}
           </button>
         </div>
+
+        {/* ── מועמדי כתובת — הכרעה מפורשת במקום ניחוש ── */}
+        {geoCands && (
+          <div style={{ background: '#fff', margin: '10px 0', borderTop: `1px solid ${BORDER}`,
+                        borderBottom: `1px solid ${BORDER}` }} className="no-print">
+            <div style={{ padding: '10px 12px', background: '#FFF8E6', borderBottom: '1px solid #F0D98C' }}>
+              <div style={{ fontSize: 13.5, fontWeight: 800, color: '#7a5b00' }}>
+                {geoCands.length === 0 ? 'לא נמצאה התאמה' :
+                 geoCands.some(c => c.exact) ? `נמצאו ${geoCands.length} התאמות — בחר` :
+                 '⚠️ מספר הבית לא נמצא'}
+              </div>
+              {!geoCands.some(c => c.exact) && geoCands.length > 0 && (
+                <div style={{ fontSize: 12.5, color: '#7a5b00', marginTop: 3, lineHeight: 1.5 }}>
+                  מאגר הכתובות לא מכיר את מספר הבית כאן. הנקודות למטה הן נקודות
+                  שרירותיות על הרחוב או מרכז היישוב — לא הכתובת המדויקת.
+                  <b> לעבודה אמיתית עדיף להזין ITM מ-Govmap.</b>
+                </div>
+              )}
+            </div>
+            {geoCands.map((c, i) => (
+              <button key={i} type="button"
+                onClick={() => { setGeoCands(null); void run(undefined, c) }}
+                style={{ display: 'block', width: '100%', textAlign: 'right', padding: '10px 12px',
+                  border: 'none', borderBottom: '1px solid #F0F2F5', background: 'none',
+                  cursor: 'pointer', fontFamily: 'inherit', direction: 'rtl' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontSize: 11, fontWeight: 800, padding: '2px 7px', borderRadius: 10,
+                    background: c.exact ? '#E8F5E9' : '#FFF4E0', color: c.exact ? '#1A5A2A' : '#8A4B00' }}>
+                    {c.precision}
+                  </span>
+                  <span style={{ fontSize: 13.5, fontWeight: 600 }}>{c.display_name}</span>
+                </div>
+                <div style={{ fontSize: 11.5, color: GREY, marginTop: 3 }} dir="ltr">
+                  ITM {Math.round(c.itm[0])} / {Math.round(c.itm[1])}
+                </div>
+              </button>
+            ))}
+            <button type="button" onClick={() => setGeoCands(null)}
+              style={{ display: 'block', width: '100%', padding: '9px 12px', border: 'none',
+                background: '#FAFAF8', cursor: 'pointer', fontFamily: 'inherit', fontSize: 13, color: '#666' }}>
+              ביטול
+            </button>
+          </div>
+        )}
 
         {/* ── שגיאה — מפורשת, אף פעם לא ריק שקט ── */}
         {err && (
