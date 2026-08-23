@@ -625,40 +625,47 @@ export default function MirchakimScreen() {
           </button>
         </div>
 
-        {/* ── מועמדי כתובת — הכרעה מפורשת במקום ניחוש ── */}
+        {/* ── מועמדי כתובת ──
+            הגרסה הראשונה הובילה ב"⚠️ מספר הבית לא נמצא" על רקע כתום,
+            והמועמדים למטה נראו כטקסט. משתמש קרא את זה כשגיאה שלוש פעמים.
+            זה לא כשל אלא שלב: מאז שיש מפה, מספר בית חסר כמעט לא משנה —
+            בוחרים גס ומכווננים. הכותרת היא הוראה, והשורות הן כפתורים. */}
         {geoCands && (
           <div style={{ background: '#fff', margin: '10px 0', borderTop: `1px solid ${BORDER}`,
                         borderBottom: `1px solid ${BORDER}` }} className="no-print">
-            <div style={{ padding: '10px 12px', background: '#FFF8E6', borderBottom: '1px solid #F0D98C' }}>
-              <div style={{ fontSize: 13.5, fontWeight: 800, color: '#7a5b00' }}>
-                {geoCands.length === 0 ? 'לא נמצאה התאמה' :
-                 geoCands.some(c => c.exact) ? `נמצאו ${geoCands.length} התאמות — בחר` :
-                 '⚠️ מספר הבית לא נמצא'}
+            <div style={{ padding: '10px 12px', background: '#EEF2FF', borderBottom: '1px solid #C7D2FE' }}>
+              <div style={{ fontSize: 14.5, fontWeight: 800, color: '#1A3E7A' }}>
+                {geoCands.length === 0 ? 'לא נמצאה התאמה' : 'בחר נקודת פתיחה'}
               </div>
-              {!geoCands.some(c => c.exact) && geoCands.length > 0 && (
-                <div style={{ fontSize: 12.5, color: '#7a5b00', marginTop: 3, lineHeight: 1.5 }}>
-                  מאגר הכתובות לא מכיר את מספר הבית כאן. הנקודות למטה הן נקודות
-                  שרירותיות על הרחוב או מרכז היישוב — לא הכתובת המדויקת.
-                  <b> לעבודה אמיתית עדיף להזין ITM מ-Govmap.</b>
+              {geoCands.length > 0 && (
+                <div style={{ fontSize: 12.5, color: '#1A3E7A', marginTop: 3, lineHeight: 1.5 }}>
+                  {geoCands.some(c => c.exact)
+                    ? 'לחץ על אחת מהאפשרויות, ותוכל לכוון את הנקודה במפה.'
+                    : 'מספר הבית לא קיים במאגר הכתובות, אז אלה נקודות על הרחוב. לחץ על אחת — במפה תגרור לבניין המדויק.'}
                 </div>
               )}
             </div>
             {geoCands.map((c, i) => (
               <button key={i} type="button"
                 onClick={() => { setGeoCands(null); openPicker(c.lat, c.lon) }}
-                style={{ display: 'block', width: '100%', textAlign: 'right', padding: '10px 12px',
-                  border: 'none', borderBottom: '1px solid #F0F2F5', background: 'none',
+                style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'right',
+                  padding: '12px', border: 'none', borderBottom: '1px solid #F0F2F5', background: 'none',
                   cursor: 'pointer', fontFamily: 'inherit', direction: 'rtl' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ fontSize: 11, fontWeight: 800, padding: '2px 7px', borderRadius: 10,
-                    background: c.exact ? '#E8F5E9' : '#FFF4E0', color: c.exact ? '#1A5A2A' : '#8A4B00' }}>
-                    {c.precision}
+                <span style={{ fontSize: 20, color: '#1A5FAD', flexShrink: 0 }}>🗺</span>
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 11, fontWeight: 800, padding: '2px 7px', borderRadius: 10,
+                      background: c.exact ? '#E8F5E9' : '#EFEBE7', color: c.exact ? '#1A5A2A' : '#4A4A4A' }}>
+                      {c.precision}
+                    </span>
+                    <span style={{ fontSize: 13.5, fontWeight: 600 }}>{c.display_name}</span>
                   </span>
-                  <span style={{ fontSize: 13.5, fontWeight: 600 }}>{c.display_name}</span>
-                </div>
-                <div style={{ fontSize: 11.5, color: GREY, marginTop: 3 }} dir="ltr">
-                  ITM {Math.round(c.itm[0])} / {Math.round(c.itm[1])}
-                </div>
+                  <span style={{ display: 'block', fontSize: 11.5, color: GREY, marginTop: 3 }} dir="ltr">
+                    ITM {Math.round(c.itm[0])} / {Math.round(c.itm[1])}
+                  </span>
+                </span>
+                <span style={{ fontSize: 13, fontWeight: 800, color: '#1A5FAD', flexShrink: 0,
+                  whiteSpace: 'nowrap' }}>כוון במפה ‹</span>
               </button>
             ))}
             <button type="button" onClick={() => setGeoCands(null)}
