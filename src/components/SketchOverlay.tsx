@@ -206,17 +206,31 @@ export default function SketchOverlay({
 
   // שרטוט הוא לחיצות ולא גרירה: מניחים פינות מדויקות, והגרירה כבר תפוסה
   // למדידה. closeDraft נחשף כלפי מעלה דרך onDraftChange + מפתח cancelSeq.
+  // עדכון פונקציונלי ולא לפי draft שנתפס בסגירה: כששתי אצבעות של צביטה
+  // נוגעות כמעט בו-זמנית, ה-batching של React יכול להריץ את שני
+  // ה-pointerdown לפני רינדור מחדש ביניהם. אם addVertex/undoVertex היו
+  // קוראים ל-draft הישן, הביטול (undoVertex) שהאצבע השנייה מפעילה היה
+  // מתבסס על המצב שלפני שהראשונה בכלל הוסיפה — ומוחק נקודה נוספת בטעות.
   function addVertex(x: number, y: number) {
-    const next: [number, number][] = [...draft, [x, y]]
-    setDraft(next); onDraftChange?.(next.length)
+    setDraft(prev => {
+      const next: [number, number][] = [...prev, [x, y]]
+      onDraftChange?.(next.length)
+      return next
+    })
   }
   function closeDraft() {
-    if (draft.length >= 3) onAddOutline?.(draft.map(([x, y]) => P.toGeo(x, y)))
-    setDraft([]); onDraftChange?.(0)
+    setDraft(prev => {
+      if (prev.length >= 3) onAddOutline?.(prev.map(([x, y]) => P.toGeo(x, y)))
+      onDraftChange?.(0)
+      return []
+    })
   }
   function undoVertex() {
-    const next = draft.slice(0, -1)
-    setDraft(next); onDraftChange?.(next.length)
+    setDraft(prev => {
+      const next = prev.slice(0, -1)
+      onDraftChange?.(next.length)
+      return next
+    })
   }
 
 
@@ -241,40 +255,75 @@ export default function SketchOverlay({
     ]
   }
 
-  function pickAt(x: number, y: number) {
+  function pickAt(x: number, y: number): string | null {
     const near = buildings
       .filter(b => (b.poly_px?.length ?? 0) >= 3)
       .map(b => ({ b, d: distToPoly(x, y, b.poly_px!) }))
       .filter(o => o.d <= 8)
       .sort((a, b2) => a.d - b2.d)
-    if (near.length === 0) { setCands(null); return }
+    if (near.length === 0) { setCands(null); return null }
     // מועמד יחיד ברור, או פגיעה מלאה בתוך מבנה אחד בלבד
     const inside = near.filter(o => o.d === 0)
     if (near.length === 1 || inside.length === 1) {
-      onToggle?.((inside.length === 1 ? inside[0] : near[0]).b.osm_id)
+      const id = (inside.length === 1 ? inside[0] : near[0]).b.osm_id
+      onToggle?.(id)
       setCands(null)
-      return
+      return id
     }
     setCands({ at: [x, y], ids: near.map(o => o.b.osm_id) })   // אי-ודאות → בחירה מפורשת
+    return null
   }
+
+  // מעקב אצבעות פעילות: Pointer Events מריצות onPointerDown בנפרד לכל
+  // אצבע. בלי המעקב הזה, האצבע השנייה של צביטה-להתרחקות נספרה כלחיצה
+  // עצמאית — מוסיפה קודקוד לשרטוט, מבטלת בחירת מבנה, או פותחת קו מדידה
+  // שני — בדיוק בזמן שהמשתמש רק ניסה להתרחק כדי לראות את "סגור פוליגון".
+  // הפתרון: ברגע שאצבע שנייה נוגעת, מבטלים את מה שהאצבע הראשונה הספיקה
+  // לעשות (זו הופכת לצביטה, לא ללחיצה), ומתעלמים מכל האצבעות עד שכולן
+  // עוזבות ומתחילה נגיעה חדשה ונקייה.
+  const activePointers = useRef<Set<number>>(new Set())
+  const gestureIsMulti = useRef(false)
+  const lastVertexPointer = useRef<number | null>(null)
+  const lastToggledPointer = useRef<{ pointerId: number; osmId: string } | null>(null)
 
   function onDown(e: React.PointerEvent) {
     if (!interactive) return
     e.stopPropagation()
+    activePointers.current.add(e.pointerId)
+
+    if (activePointers.current.size >= 2) {
+      // הופך לצביטה — מבטלים את מה שהאצבע הראשונה הספיקה לעשות
+      gestureIsMulti.current = true
+      if (mode === 'draw' && lastVertexPointer.current !== null) { undoVertex(); lastVertexPointer.current = null }
+      if (mode === 'measure' && drag) { setDrag(null); onPendingChange?.(false) }
+      if (mode === 'select' && lastToggledPointer.current) { onToggle?.(lastToggledPointer.current.osmId); lastToggledPointer.current = null }
+      return
+    }
+    if (gestureIsMulti.current) return         // אצבע שנשארה מצביטה קודמת
+
     const [x, y] = at(e)
-    if (mode === 'select') { pickAt(x, y); return }
-    if (mode === 'draw') { addVertex(x, y); return }
+    if (mode === 'select') {
+      const id = pickAt(x, y)
+      if (id) lastToggledPointer.current = { pointerId: e.pointerId, osmId: id }
+      return
+    }
+    if (mode === 'draw') { addVertex(x, y); lastVertexPointer.current = e.pointerId; return }
     ;(e.target as Element).setPointerCapture?.(e.pointerId)
     setDrag({ a: [x, y], b: [x, y] })
     onPendingChange?.(true)
   }
   function onMove(e: React.PointerEvent) {
-    if (mode !== 'measure' || !drag) return
+    if (gestureIsMulti.current || mode !== 'measure' || !drag) return
     e.stopPropagation()
     setDrag({ a: drag.a, b: at(e) })
   }
+  function endPointer(id: number) {
+    activePointers.current.delete(id)
+    if (activePointers.current.size === 0) gestureIsMulti.current = false
+  }
   function onUp(e: React.PointerEvent) {
-    if (mode !== 'measure' || !drag) return
+    endPointer(e.pointerId)
+    if (gestureIsMulti.current || mode !== 'measure' || !drag) return
     e.stopPropagation()
     const b = at(e)
     const moved = Math.hypot(b[0] - drag.a[0], b[1] - drag.a[1])
@@ -297,7 +346,7 @@ export default function SketchOverlay({
           cursor: mode === 'select' ? 'pointer' : mode === 'measure' ? 'crosshair' : undefined,
         }}
         onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp}
-        onPointerCancel={() => { setDrag(null); onPendingChange?.(false) }}
+        onPointerCancel={e => { endPointer(e.pointerId); setDrag(null); onPendingChange?.(false) }}
       >
         {buildings.map(b => {
           if ((b.poly_px?.length ?? 0) < 3) return null
