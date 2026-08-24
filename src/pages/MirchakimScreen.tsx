@@ -194,6 +194,10 @@ export default function MirchakimScreen() {
   const [outlines, setOutlines] = useState<Outline[]>([])
   const addOutline = (pts: GeoPt[]) => {
     setOutlines(prev => [...prev, { id: rowId(), pts, name: `מבנה ${prev.length + 1}` }])
+    // שורה בטבלת "מבנים עם אסבסט" ברגע שהמתאר נסגר, לא רק כשלוחצים
+    // "✓ סיום · למבנים" — אחרת מי שעובר ישר למדידת מרחקים (ומסיים דרך
+    // הכפתור של המדידה) משאיר את הטבלה על 0 בלי לשים לב שהיא לא התמלאה.
+    setAsbRows(rs => (rs.length > outlines.length ? rs : [...rs, emptyAsbRow()]))
     setFormDirty(true)
   }
   const toggleBuilding = (id: string) => {
@@ -1205,15 +1209,10 @@ export default function MirchakimScreen() {
             setTimeout(() => distTableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 120)
           }}
           onFinishOutline={() => {
-            // שרטוט המתאר על התצלום לא ממלא לבד את טבלת "מבנים עם אסבסט" —
-            // השטח המצולם הוא היטל אופקי ולא שווה לשטח הגג האמיתי (גג משופע),
-            // אז אי אפשר להשלים את השורה אוטומטית. מה שכן חסר עד עכשיו היה
-            // הכפתור שמעביר בפועל לטבלה כדי למלא אותה, כמו שיש למדידת מרחק.
+            // יצירת השורה עצמה קורית כבר ב-addOutline (בסגירת המתאר) — כאן
+            // רק המעבר בפועל לטבלה, למי שרוצה לסיים ולמלא אותה מיד.
             setZoomOpen(false)
-            setAsbRows(rs => rs.length >= outlines.length
-              ? rs
-              : [...rs, ...Array.from({ length: outlines.length - rs.length }, () => emptyAsbRow())])
-            setEditAsb(true); setFormDirty(true)
+            setEditAsb(true)
             setTimeout(() => asbTableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 120)
           }}
           onUndo={() => { setMeasures(m => m.slice(0, -1)); setFormDirty(true) }}
