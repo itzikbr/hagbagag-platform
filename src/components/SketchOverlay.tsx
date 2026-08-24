@@ -222,13 +222,23 @@ export default function SketchOverlay({
 
   /** מיקום מצביע → קואורדינטות ה-viewBox. getScreenCTM מטפל בזום/הזזה
    *  של ה-Lightbox ובכל scale של הדפדפן, ולכן אין כאן חשבון ידני. */
+  /** מיקום מצביע/מגע → קואורדינטות ה-viewBox.
+   *  getScreenCTM().inverse() היה כאן קודם — תקין תיאורטית, אבל ל-Safari
+   *  ב-iOS יש תקלות מתועדות בדיוק בתצורה הזו: SVG בתוך אב עם
+   *  position:fixed ו-transform:scale() (הלייטבוקס שלנו). זה גרם לכך
+   *  שנקודת המגע נרשמה במקום אחר מהמקום שבו המשתמש נגע — גם בשרטוט
+   *  (לחיצות בודדות) וגם במדידה (press+drag+release), כי שניהם עוברים
+   *  כאן. getBoundingClientRect + יחס סקאלה מפורש הן הטכניקה הנפוצה
+   *  והעמידה יותר למיפוי מגע על אלמנט מותמר, ולא תלויות במימוש CTM. */
   function at(e: React.PointerEvent): [number, number] {
     const svg = svgRef.current
     if (!svg) return [0, 0]
-    const ctm = svg.getScreenCTM()
-    if (!ctm) return [0, 0]
-    const pt = new DOMPoint(e.clientX, e.clientY).matrixTransform(ctm.inverse())
-    return [pt.x, pt.y]
+    const rect = svg.getBoundingClientRect()
+    if (rect.width === 0 || rect.height === 0) return [0, 0]
+    return [
+      ((e.clientX - rect.left) / rect.width) * width,
+      ((e.clientY - rect.top) / rect.height) * height,
+    ]
   }
 
   function pickAt(x: number, y: number) {
