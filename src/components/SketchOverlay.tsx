@@ -268,9 +268,28 @@ export default function SketchOverlay({
     if (!svg) return [0, 0]
     const rect = svg.getBoundingClientRect()
     if (rect.width === 0 || rect.height === 0) return [0, 0]
+    // ה-SVG ממשיך "meet" (ברירת המחדל של preserveAspectRatio): כשהקופסה
+    // שלו לא זהה ביחס-הממדים ל-viewBox, הוא ממרכז ומצייר את התוכן בתת-
+    // מלבן פנימי, לא בכל הקופסה — בדיוק כמו object-fit:contain של התמונה.
+    // עד עכשיו זה לא הזיק כי wrap היה display:inline-block וצומצם לגודל
+    // התמונה עצמה (קופסה מרובעת בפועל). התיקון לגלישה בדסקטופ שינה את
+    // wrap ל-width/height:100% של מסך רחב — קופסה לא-מרובעת — וה-SVG
+    // התחיל למרכז את עצמו בתוכה, בזמן שהחישוב כאן עדיין הניח שכל הקופסה
+    // הרוחבית שווה ל-viewBox. לחיצה ליד הקצוות יצאה מוסטת בדיוק כפי שדווח.
+    // הפתרון: לשחזר ידנית את אותו תת-מלבן ("meet") ולמפות ביחס אליו.
+    const boxAspect = rect.width / rect.height
+    const vbAspect = width / height
+    let visW = rect.width, visH = rect.height, offX = 0, offY = 0
+    if (boxAspect > vbAspect) {
+      visW = rect.height * vbAspect
+      offX = (rect.width - visW) / 2
+    } else {
+      visH = rect.width / vbAspect
+      offY = (rect.height - visH) / 2
+    }
     return [
-      ((e.clientX - rect.left) / rect.width) * width,
-      ((e.clientY - rect.top) / rect.height) * height,
+      ((e.clientX - rect.left - offX) / visW) * width,
+      ((e.clientY - rect.top - offY) / visH) * height,
     ]
   }
 
