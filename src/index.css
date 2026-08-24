@@ -53,6 +53,15 @@ body {
   section, .print-block { page-break-inside: avoid; }
   html, body, #root { height: auto !important; overflow: visible !important; background: #fff !important; }
   .no-scrollbar { overflow: visible !important; height: auto !important; }
+  /* height:auto לבד לא הספיק: מסך #root ומכליו הישירים הם flex column עם
+     flex:1 על האזור הגלילי. ב-flexbox, flex-basis:0% על אב שגובהו auto
+     קורס במקום לגדול לפי התוכן — כל הטופס נחתך לעמוד/מסך אחד בהדפסה.
+     display:block עוקף את חשבון ה-flex לגמרי ומאלץ גובה לפי תוכן אמיתי.
+     :not(.no-print) חובה: selector עם #root מנצח .no-print בספציפיות,
+     והחלק העליון-האדום (גם הוא #root > div > div) נחשף מחדש בלעדיו. */
+  #root:not(.no-print), #root > div:not(.no-print), #root > div > div:not(.no-print) {
+    display: block !important; height: auto !important; overflow: visible !important;
+  }
   img { max-width: 100% !important; page-break-inside: avoid; }
 }
 

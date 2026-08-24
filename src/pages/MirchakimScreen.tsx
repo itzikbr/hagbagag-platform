@@ -731,7 +731,7 @@ export default function MirchakimScreen() {
 
         {/* ── שגיאה — מפורשת, אף פעם לא ריק שקט ── */}
         {err && (
-          <div style={{ margin: 14, padding: '12px 14px', background: '#FDECEC', border: '1px solid #F0A9B2', borderRadius: 10 }}>
+          <div className="no-print" style={{ margin: 14, padding: '12px 14px', background: '#FDECEC', border: '1px solid #F0A9B2', borderRadius: 10 }}>
             <div style={{ fontSize: 14, fontWeight: 800, color: '#8E1B27' }}>
               ⚠️ {err.stage ? `כשל בשלב: ${err.stage}` : 'החישוב נכשל'}
             </div>
