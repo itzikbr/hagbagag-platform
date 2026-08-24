@@ -1499,7 +1499,7 @@ function Lightbox({ src, onClose, res, selected, measures, outlines, onToggle, o
         )}
         {proj && ([['pan', '🖐 ניווט'], ['select', '🏠 בחירה'], ['draw', '✏️ שרטוט מבנה'], ['measure', '📏 מדוד מרחק']] as [LbMode, string][])
           .map(([m, t]) => (
-          <button key={m} type="button" onClick={() => { setMode(m); setPending(false); setDraftPts(0); bumpCancel() }}
+          <button key={m} type="button" onClick={() => setMode(m)}
             style={{ ...lbBtn, background: mode === m ? '#2563EB' : 'rgba(255,255,255,0.14)',
                      borderColor: mode === m ? '#2563EB' : 'rgba(255,255,255,0.3)', fontWeight: 800 }}>{t}</button>
         ))}
