@@ -83,6 +83,21 @@ export function distToPoly(x: number, y: number, poly: number[][]): number {
   return best
 }
 
+/** תג המבנה בקצה הקו — מ1, מ2. זה המזהה היחיד של מבנה שכן: הוא מונח
+ *  עליו בתצלום, ומופיע כאותו ערך בעמודת "מס׳" בטבלה. אין סימון נפרד
+ *  למבנים שכנים; הקו הוא גם המדידה וגם ההצבעה. */
+function BuildingTag({ x, y, n, s }: { x: number; y: number; n: number; s: number }) {
+  const r = 13 * s
+  return (
+    <g>
+      <circle cx={x} cy={y} r={r} fill="#fff" stroke={MEAS} strokeWidth={2.2 * s} />
+      <text x={x} y={y} textAnchor="middle" dominantBaseline="central"
+        fontSize={13 * s} fontWeight={800} fill="#1E3A8A"
+        fontFamily="system-ui, -apple-system, sans-serif">{`מ${n}`}</text>
+    </g>
+  )
+}
+
 /** תווית מרחק באמצע הקו, מסובבת בזווית הקו ובלי להתהפך. */
 function MeasureLabel({ ax, ay, bx, by, text, s, n }: {
   ax: number; ay: number; bx: number; by: number; text: string; s: number; n?: number
@@ -93,7 +108,7 @@ function MeasureLabel({ ax, ay, bx, by, text, s, n }: {
   if (ang < -90) ang += 180
   // הוגדל: אלה התוויות היחידות שנשארו אחרי שקווי המרחק של המנוע כובו,
   // והן צריכות להיקרא גם בהקטנה ל-A4.
-  const full = n ? `${n} · ${text}` : text
+  const full = text
   const w = full.length * 12 * s + 18 * s
   const h = 28 * s
   return (
@@ -222,9 +237,9 @@ export default function SketchOverlay({
           return (
             <g key={m.id}>
               <line x1={ax} y1={ay} x2={bx} y2={by} stroke={MEAS} strokeWidth={2.5 * s} strokeLinecap="round" />
-              <circle cx={ax} cy={ay} r={3.5 * s} fill={MEAS} stroke="#fff" strokeWidth={1.2 * s} />
-              <circle cx={bx} cy={by} r={3.5 * s} fill={MEAS} stroke="#fff" strokeWidth={1.2 * s} />
-              <MeasureLabel ax={ax} ay={ay} bx={bx} by={by} s={s} n={i + 1} text={geoLen(m.a, m.b)} />
+              <circle cx={ax} cy={ay} r={4 * s} fill={MEAS} stroke="#fff" strokeWidth={1.4 * s} />
+              <MeasureLabel ax={ax} ay={ay} bx={bx} by={by} s={s} text={geoLen(m.a, m.b)} />
+              <BuildingTag x={bx} y={by} n={i + 1} s={s} />
             </g>
           )
         })}
@@ -235,8 +250,8 @@ export default function SketchOverlay({
               stroke={MEAS} strokeWidth={2.5 * s} strokeDasharray={`${7 * s} ${5 * s}`} strokeLinecap="round" />
             <circle cx={drag.a[0]} cy={drag.a[1]} r={3.5 * s} fill={MEAS} stroke="#fff" strokeWidth={1.2 * s} />
             <MeasureLabel ax={drag.a[0]} ay={drag.a[1]} bx={drag.b[0]} by={drag.b[1]} s={s}
-              n={measures.length + 1}
               text={geoLen(P.toGeo(drag.a[0], drag.a[1]), P.toGeo(drag.b[0], drag.b[1]))} />
+            <BuildingTag x={drag.b[0]} y={drag.b[1]} n={measures.length + 1} s={s} />
           </g>
         )}
       </svg>

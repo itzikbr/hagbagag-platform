@@ -170,6 +170,7 @@ export default function MirchakimScreen() {
   const [linkOpen, setLinkOpen] = useState(false)
   const [sheets, setSheets] = useState<SheetOpt[]>([])
   const printRef = useRef<HTMLDivElement>(null)
+  const distTableRef = useRef<HTMLDivElement>(null)
   const [zoomOpen, setZoomOpen] = useState(false)
   const [radiusM, setRadiusM] = useState('')
 
@@ -905,6 +906,7 @@ export default function MirchakimScreen() {
                 מספר בשניהם, ומחיקה בטבלה מוחקת את הקו. שם גנרי ניתן לעריכה.
                 שורה ידנית ("+ הוסף מבנה סמוך") למי שמדד בשטח בלי לצייר קו. */}
             {(measures.length > 0 || distRows.length > 0) && (
+              <div ref={distTableRef}>
               <Section title="מרחקים ממבנים אחרים" badge={String(measures.length + distRows.length)}
                 action={<EditToggle on={editDist} onClick={() => setEditDist(!editDist)} />}>
                 <div className="tbl-scroll" style={{ overflowX: 'auto' }}>
@@ -920,7 +922,7 @@ export default function MirchakimScreen() {
                     <tbody>
                       {measures.map((m, i) => (
                         <tr key={m.id}>
-                          <td style={{ ...td, fontWeight: 800 }}>{i + 1}</td>
+                          <td style={{ ...td, fontWeight: 800, color: '#1E3A8A' }}>{`מ${i + 1}`}</td>
                           <td style={{ ...td, whiteSpace: 'normal' }}>{editDist
                             ? <CellInp value={m.name ?? ''} onChange={v => patchMeasure(m.id, { name: v })} />
                             : (m.name || <span style={{ color: GREY }}>—</span>)}</td>
@@ -937,7 +939,7 @@ export default function MirchakimScreen() {
                       ))}
                       {distRows.map((d, i) => (
                         <tr key={d.id}>
-                          <td style={{ ...td, fontWeight: 800 }}>{measures.length + i + 1}</td>
+                          <td style={{ ...td, fontWeight: 800, color: '#1E3A8A' }}>{`מ${measures.length + i + 1}`}</td>
                           <td style={{ ...td, whiteSpace: 'normal' }}>{editDist
                             ? <CellInp value={d.name} onChange={v => patchDist(d.id, { name: v })} />
                             : (d.name || <span style={{ color: GREY }}>—</span>)}</td>
@@ -962,11 +964,12 @@ export default function MirchakimScreen() {
                   </div>
                 )}
                 <div style={{ padding: '6px 12px 10px', fontSize: 11.5, color: GREY, lineHeight: 1.5 }} className="no-print">
-                  כל קו שתסמן על התצלום נפתח כאן כשורה, עם אותו מספר. השם ניתן לעריכה
-                  דרך "✏️ ערוך".
+                  כל קו שתסמן על התצלום נפתח כאן כשורה. התג <b>מ1</b>, <b>מ2</b> שעל התצלום
+                  יושב על המבנה השכן, והוא אותו מזהה שבעמודת "מס׳". השם ניתן לעריכה דרך "✏️ ערוך".
                   {res && ` המנוע מצא ${res.buildings.length} מבנים ב-OSM ברדיוס ${radiusOf(res)} מ׳ — לידיעה בלבד, לא נכנסים לטבלה.`}
                 </div>
               </Section>
+              </div>
             )}
 
             {/* עוד לא סומנו קווים — הנחיה, לא שגיאה */}
@@ -1106,6 +1109,11 @@ export default function MirchakimScreen() {
         <Lightbox src={res.image_url} onClose={() => setZoomOpen(false)} res={res}
           selected={selectedIds} measures={measures}
           onToggle={toggleBuilding} onAddMeasure={addMeasure}
+          onFinish={() => {
+            setZoomOpen(false); setEditDist(true)
+            // הגלילה אחרי סגירת הלייטבוקס — הטבלה עדיין לא במקומה באותו טיק
+            setTimeout(() => distTableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 120)
+          }}
           onUndo={() => { setMeasures(m => m.slice(0, -1)); setFormDirty(true) }}
           onClearMeasures={() => { setMeasures([]); setFormDirty(true) }}
           onClearSelection={() => { setSelectedIds(new Set()); setFormDirty(true) }} />
@@ -1283,13 +1291,14 @@ function AddBtn({ onClick, text }: { onClick: () => void; text: string }) {
 // כך שההתנהגות זהה בכל מכשיר.
 type LbMode = 'pan' | 'select' | 'measure'
 
-function Lightbox({ src, onClose, res, selected, measures, onToggle, onAddMeasure, onUndo, onClearMeasures, onClearSelection }: {
+function Lightbox({ src, onClose, res, selected, measures, onToggle, onAddMeasure, onFinish, onUndo, onClearMeasures, onClearSelection }: {
   src: string; onClose: () => void
   res: Result
   selected: Set<string>
   measures: Measure[]
   onToggle: (id: string) => void
   onAddMeasure: (m: { a: GeoPt; b: GeoPt }) => void
+  onFinish: () => void
   onUndo: () => void
   onClearMeasures: () => void
   onClearSelection: () => void
@@ -1461,13 +1470,19 @@ function Lightbox({ src, onClose, res, selected, measures, onToggle, onAddMeasur
           <>
             <button type="button" onClick={onUndo} style={lbBtn}>↶ בטל קו אחרון</button>
             <button type="button" onClick={onClearMeasures} style={lbBtn}>נקה הכל</button>
+            {/* עד עכשיו היה צריך לנחש Escape פעמיים או ✕ בפינה. זו הפעולה
+                הראשית בסוף המדידה, ולכן היא בולטת ומובילה ישר לטבלה. */}
+            <button type="button" onClick={onFinish}
+              style={{ ...lbBtn, background: '#1A5A2A', borderColor: '#1A5A2A', fontWeight: 800 }}>
+              ✓ סיום · לטבלה ({measures.length})
+            </button>
           </>
         )}
       </div>
 
       <div style={{ textAlign: 'center', color: 'rgba(255,255,255,0.75)', fontSize: 12, padding: '0 12px 12px' }}>
         {mode === 'select' && 'לחץ על מבנה כדי לבחור · לחיצה נוספת מבטלת · Escape ליציאה'}
-        {mode === 'measure' && 'לחץ, גרור ושחרר כדי למדוד · Escape מבטל מדידה בתהליך'}
+        {mode === 'measure' && 'התחל מהמבנה שלך וגרור אל השכן — התג מ1, מ2 מונח בנקודת השחרור'}
         {mode === 'pan' && 'גלגלת או צביטה · + / − / 0 במקלדת · גרירה להזזה · לחיצה כפולה למעבר מהיר · טווח 0.25×–8×'}
       </div>
       </div>
