@@ -502,7 +502,12 @@ export default function SketchOverlay({
       </svg>
 
       {mode === 'draw' && (
-        <div style={{ position: 'absolute', top: 10, left: 0, right: 0, display: 'flex',
+        // top:58 ולא 10: בטלפון הרצועה הזו נחתה בדיוק על שורת ה-✕סגור/זום
+        // של הלייטבוקס (שם top:12) — שתיהן position:absolute ברוחב מלא,
+        // וכפתור ה-"+" של הזום (שמעל בסדר ה-DOM) בלע לחיצות שיועדו ל-
+        // "✓ סגור פוליגון". זו הסיבה שהיה אפשר "ליצור" שרטוט חופשי בלי
+        // באמת לסגור אותו — הלחיצה על סגירה בפועל הגדילה זום.
+        <div style={{ position: 'absolute', top: 58, left: 0, right: 0, display: 'flex',
           gap: 8, justifyContent: 'center', flexWrap: 'wrap', direction: 'rtl', zIndex: 6 }}>
           <span style={{ background: 'rgba(0,0,0,0.75)', color: '#fff', fontSize: 12.5,
             fontWeight: 700, padding: '6px 11px', borderRadius: 16 }}>
