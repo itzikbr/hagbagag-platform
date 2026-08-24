@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import SketchOverlay, { measureMeters, type Measure, type Proj, type GeoPt } from '../components/SketchOverlay'
+import SketchOverlay, { measureMeters, outlineArea, type Measure, type Outline, type Proj, type GeoPt } from '../components/SketchOverlay'
 import LocationPicker, { type PickedPoint } from '../components/LocationPicker'
 import {
   PERMIT_TYPES, PERMIT_INFO, DEFAULT_PERMIT_TYPE, permitDef, permitTiming,
@@ -179,6 +179,11 @@ export default function MirchakimScreen() {
   // שינוי רדיוס מרנדר בזום ופריסה אחרים, ופיקסלים שמורים היו הופכים לשקר.
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [measures, setMeasures] = useState<Measure[]>([])
+  const [outlines, setOutlines] = useState<Outline[]>([])
+  const addOutline = (pts: GeoPt[]) => {
+    setOutlines(prev => [...prev, { id: rowId(), pts, name: `מבנה ${prev.length + 1}` }])
+    setFormDirty(true)
+  }
   const toggleBuilding = (id: string) => {
     setSelectedIds(prev => {
       const n = new Set(prev)
@@ -312,7 +317,7 @@ export default function MirchakimScreen() {
   async function run(overrideRadius?: number, point?: { lat: number; lon: number }) {
     // שינוי רדיוס (overrideRadius) שומר סימונים — אותו מיקום.
     // חישוב חדש מהכפתור = מיקום אחר בפועל, ולכן מאפס.
-    if (overrideRadius === undefined) { setSelectedIds(new Set()); setMeasures([]) }
+    if (overrideRadius === undefined) { setSelectedIds(new Set()); setMeasures([]); setOutlines([]) }
     setBusy(true); setErr(null); setRes(null); setSaveState('idle'); setSaveMsg('')
     try {
       const body: Record<string, string> = { label }
@@ -404,6 +409,14 @@ export default function MirchakimScreen() {
             name: String(m.name || `מבנה ${i + 1}`),
           })))
       }
+      const savedOut = wc?.mirchakim?.outlines
+      if (Array.isArray(savedOut)) {
+        setOutlines(savedOut
+          .filter((o: Record<string, unknown>) => Array.isArray(o?.pts) && (o.pts as unknown[]).length >= 3)
+          .map((o: Record<string, unknown>, i: number) => ({
+            id: rowId(), pts: o.pts as GeoPt[], name: String(o.name || `מבנה ${i + 1}`),
+          })))
+      }
       const pt = sheetRes.data?.progress_data?.asbestos_permit?.permit_type
       setPermitType(PERMIT_TYPES.some(t => t.key === pt) ? pt : DEFAULT_PERMIT_TYPE)
       setFormDirty(false)
@@ -449,6 +462,7 @@ export default function MirchakimScreen() {
         distances: distRows.map(d => ({ name: d.name, distance_m: d.distance_m })),
         selected_buildings: [...selectedIds],
         measures: measures.map(m => ({ a: m.a, b: m.b, name: m.name ?? '' })),
+        outlines: outlines.map(o => ({ pts: o.pts, name: o.name ?? '' })),
         image_id: res?.image_id ?? (wc.mirchakim?.image_id ?? null),
         radius_m: res ? radiusOf(res) : (wc.mirchakim?.radius_m ?? null),
         updated_at: new Date().toISOString(),
@@ -718,20 +732,22 @@ export default function MirchakimScreen() {
                   <img src={res.image_url} alt="תצלום אווירי עם מרחקים"
                     style={{ width: '100%', borderRadius: 8, display: 'block' }} />
                 </button>
-                {res.image_meta.projection && (selectedIds.size > 0 || measures.length > 0) && (
+                {res.image_meta.projection && (selectedIds.size > 0 || measures.length > 0 || outlines.length > 0) && (
                   <SketchOverlay width={res.image_meta.size_px[0]} height={res.image_meta.size_px[1]}
                     metersPerPx={res.image_meta.meters_per_px} proj={res.image_meta.projection}
-                    buildings={res.buildings} selected={selectedIds} measures={measures} />
+                    buildings={res.buildings} selected={selectedIds} measures={measures}
+                    outlines={outlines} />
                 )}
               </div>
               <div style={{ fontSize: 11.5, color: GREY, marginTop: 4, textAlign: 'center' }} className="no-print">
                 לחץ על התמונה להגדלה — שם אפשר גם לסמן מבנים ולמדוד מרחקים
               </div>
-              {(selectedIds.size > 0 || measures.length > 0) && (
+              {(selectedIds.size > 0 || measures.length > 0 || outlines.length > 0) && (
                 <div style={{ fontSize: 12, color: '#1A3E7A', background: '#EEF2FF', borderRadius: 8,
                   padding: '6px 10px', marginTop: 6, display: 'flex', gap: 10, flexWrap: 'wrap' }} className="no-print">
                   {selectedIds.size > 0 && <span>🏠 {selectedIds.size} מבנים מסומנים</span>}
                   {measures.length > 0 && <span>📏 {measures.length} קווי מדידה</span>}
+                  {outlines.length > 0 && <span>✏️ {outlines.length} מתארים משורטטים</span>}
                   {!linkedMode && <span style={{ color: '#8A4B00' }}>· לא יישמר — קשר לעבודה כדי לשמור</span>}
                 </div>
               )}
@@ -894,6 +910,29 @@ export default function MirchakimScreen() {
                   <AddBtn text="+ הוסף מבנה" onClick={() => { setAsbRows(rs => [...rs, emptyAsbRow()]); setFormDirty(true) }} />
                 </div>
               )}
+              {/* השוואת שטח — בדיקה בלבד, לעולם לא ממלאת את השדה. התצלום מראה
+                  היטל אופקי, וגג משופע פרוש על יותר (15° ≈ +3.5%) — מספר
+                  שנראה סמכותי אבל נמוך שיטתית, בדיוק על סף רגולטורי. */}
+              {outlines.length > 0 && (() => {
+                const drawn = outlines.reduce((t, o) => t + outlineArea(o.pts), 0)
+                const gap = totalArea > 0 ? Math.abs(drawn - totalArea) / totalArea : 0
+                const off = totalArea > 0 && gap > 0.2
+                return (
+                  <div style={{ margin: '0 12px 10px', padding: '8px 10px', borderRadius: 8, fontSize: 12.5,
+                    lineHeight: 1.55, background: off ? '#FFF8E6' : '#F3F7F3',
+                    border: `1px solid ${off ? '#F0D98C' : '#CFE3CF'}`, color: off ? '#7a5b00' : '#31562F' }}
+                    className="no-print">
+                    {off ? '⚠️ ' : '✓ '}
+                    שטח שהוקלד <b>{fmtNum(Math.round(totalArea))}</b> מ"ר ·
+                    היטל מ-{outlines.length === 1 ? 'המתאר' : `${outlines.length} המתארים`} ששרטטת <b>{fmtNum(Math.round(drawn))}</b> מ"ר
+                    {off && ` — פער ${Math.round(gap * 100)}%. ודא שסימנת את המבנה הנכון.`}
+                    {!off && totalArea > 0 && ' — תואם.'}
+                    <div style={{ marginTop: 2, color: GREY }}>
+                      ההיטל אינו מחליף מדידה: גג משופע פרוש על שטח גדול יותר ממה שנראה מלמעלה.
+                    </div>
+                  </div>
+                )
+              })()}
               <div style={{ padding: '6px 12px 10px', fontSize: 11.5, color: GREY, lineHeight: 1.5 }} className="no-print">
                 תג "סיווג מוצע" מחושב לכל מבנה בנפרד לפי תבניות התקנות, והוא מידע בלבד —
                 הקביעה בפועל היא סוג ההיתר היחיד שנבחר למעלה. סימן <b>?</b> על התג = חסרים נתונים
@@ -1107,8 +1146,9 @@ export default function MirchakimScreen() {
       )}
       {zoomOpen && res && (
         <Lightbox src={res.image_url} onClose={() => setZoomOpen(false)} res={res}
-          selected={selectedIds} measures={measures}
-          onToggle={toggleBuilding} onAddMeasure={addMeasure}
+          selected={selectedIds} measures={measures} outlines={outlines}
+          onToggle={toggleBuilding} onAddMeasure={addMeasure} onAddOutline={addOutline}
+          onUndoOutline={() => { setOutlines(o => o.slice(0, -1)); setFormDirty(true) }}
           onFinish={() => {
             setZoomOpen(false); setEditDist(true)
             // הגלילה אחרי סגירת הלייטבוקס — הטבלה עדיין לא במקומה באותו טיק
@@ -1289,15 +1329,18 @@ function AddBtn({ onClick, text }: { onClick: () => void; text: string }) {
 // ב-iOS ההתנהגות הנייטיבית בתוך div אינה עקבית. כאן pinch מחושב ידנית
 // ממרחק שתי האצבעות, ובנוסף יש גרירה, לחיצה כפולה, גלגלת וכפתורים —
 // כך שההתנהגות זהה בכל מכשיר.
-type LbMode = 'pan' | 'select' | 'measure'
+type LbMode = 'pan' | 'select' | 'measure' | 'draw'
 
-function Lightbox({ src, onClose, res, selected, measures, onToggle, onAddMeasure, onFinish, onUndo, onClearMeasures, onClearSelection }: {
+function Lightbox({ src, onClose, res, selected, measures, outlines, onToggle, onAddMeasure, onAddOutline, onUndoOutline, onFinish, onUndo, onClearMeasures, onClearSelection }: {
   src: string; onClose: () => void
   res: Result
   selected: Set<string>
   measures: Measure[]
+  outlines: Outline[]
   onToggle: (id: string) => void
   onAddMeasure: (m: { a: GeoPt; b: GeoPt }) => void
+  onAddOutline: (pts: GeoPt[]) => void
+  onUndoOutline: () => void
   onFinish: () => void
   onUndo: () => void
   onClearMeasures: () => void
@@ -1308,10 +1351,12 @@ function Lightbox({ src, onClose, res, selected, measures, onToggle, onAddMeasur
   // לסימון בכלל.
   const [mode, setMode] = useState<LbMode>('pan')
   const [pending, setPending] = useState(false)
+  const [draftPts, setDraftPts] = useState(0)
   const [cancelSeq, setCancelSeq] = useState(0)      // מאלץ איפוס מדידה תלויה
   const bumpCancel = () => setCancelSeq(n => n + 1)
   const modeRef = useRef<LbMode>('pan'); modeRef.current = mode
   const pendingRef = useRef(false); pendingRef.current = pending
+  const draftRef = useRef(0); draftRef.current = draftPts
   const proj = res.image_meta.projection
   const [iw, ih] = res.image_meta.size_px
   const [z, setZ] = useState(1)
@@ -1343,6 +1388,7 @@ function Lightbox({ src, onClose, res, selected, measures, onToggle, onAddMeasur
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         // מהפנימי לחיצוני: מדידה תלויה → יציאה ממצב → סגירה
+        if (draftRef.current > 0) { setDraftPts(0); bumpCancel(); return }
         if (pendingRef.current) { setPending(false); bumpCancel(); return }
         if (modeRef.current !== 'pan') { setMode('pan'); return }
         onClose(); return
@@ -1421,8 +1467,9 @@ function Lightbox({ src, onClose, res, selected, measures, onToggle, onAddMeasur
           <SketchOverlay key={cancelSeq} width={iw} height={ih}
             metersPerPx={res.image_meta.meters_per_px} proj={proj}
             buildings={res.buildings} selected={selected} measures={measures}
-            mode={mode} onToggle={onToggle} onAddMeasure={onAddMeasure}
-            onPendingChange={setPending} />
+            outlines={outlines} mode={mode} onToggle={onToggle} onAddMeasure={onAddMeasure}
+            onAddOutline={onAddOutline} onPendingChange={setPending}
+            onDraftChange={setDraftPts} />
         )}
       </div>
 
@@ -1450,9 +1497,9 @@ function Lightbox({ src, onClose, res, selected, measures, onToggle, onAddMeasur
             ⚠️ הסקיצה חושבה לפני עדכון השרת — הרץ חישוב מחדש כדי לסמן מבנים
           </span>
         )}
-        {proj && ([['pan', '🖐 ניווט'], ['select', '🏠 בחירת מבנים'], ['measure', '📏 מדוד מרחק']] as [LbMode, string][])
+        {proj && ([['pan', '🖐 ניווט'], ['select', '🏠 בחירה'], ['draw', '✏️ שרטוט מבנה'], ['measure', '📏 מדוד מרחק']] as [LbMode, string][])
           .map(([m, t]) => (
-          <button key={m} type="button" onClick={() => { setMode(m); setPending(false); bumpCancel() }}
+          <button key={m} type="button" onClick={() => { setMode(m); setPending(false); setDraftPts(0); bumpCancel() }}
             style={{ ...lbBtn, background: mode === m ? '#2563EB' : 'rgba(255,255,255,0.14)',
                      borderColor: mode === m ? '#2563EB' : 'rgba(255,255,255,0.3)', fontWeight: 800 }}>{t}</button>
         ))}
@@ -1465,6 +1512,9 @@ function Lightbox({ src, onClose, res, selected, measures, onToggle, onAddMeasur
               <button type="button" onClick={onClearSelection} style={lbBtn}>נקה בחירה</button>
             )}
           </>
+        )}
+        {mode === 'draw' && outlines.length > 0 && draftPts === 0 && (
+          <button type="button" onClick={onUndoOutline} style={lbBtn}>↶ בטל מתאר אחרון</button>
         )}
         {mode === 'measure' && measures.length > 0 && (
           <>
@@ -1482,6 +1532,7 @@ function Lightbox({ src, onClose, res, selected, measures, onToggle, onAddMeasur
 
       <div style={{ textAlign: 'center', color: 'rgba(255,255,255,0.75)', fontSize: 12, padding: '0 12px 12px' }}>
         {mode === 'select' && 'לחץ על מבנה כדי לבחור · לחיצה נוספת מבטלת · Escape ליציאה'}
+        {mode === 'draw' && 'לחץ על כל פינה של המבנה, ואז "סגור פוליגון" · Escape מבטל שרטוט בתהליך'}
         {mode === 'measure' && 'התחל מהמבנה שלך וגרור אל השכן — התג מ1, מ2 מונח בנקודת השחרור'}
         {mode === 'pan' && 'גלגלת או צביטה · + / − / 0 במקלדת · גרירה להזזה · לחיצה כפולה למעבר מהיר · טווח 0.25×–8×'}
       </div>

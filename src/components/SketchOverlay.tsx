@@ -13,6 +13,28 @@ import { useRef, useState } from 'react'
 export interface GeoPt { lat: number; lon: number }
 export interface Measure { id: string; a: GeoPt; b: GeoPt; name?: string }
 
+/** מתאר שהמשתמש שרטט. נשמר ב-lat/lon ולא בפיקסלים — שינוי רדיוס מרנדר
+ *  בזום ופריסה אחרים, ופיקסלים שמורים היו הופכים לשקר. אותו שיעור כמו
+ *  בקווי המדידה. */
+export interface Outline { id: string; pts: GeoPt[]; name?: string }
+
+/** שטח הפוליגון במ״ר — נוסחת השרוך על היטל מקומי במטרים.
+ *  תצוגה בלבד: זה ההיטל האופקי מהתצלום, וגג משופע פרוש על יותר
+ *  (15° ≈ +3.5%). למלא בו שדה רגולטורי היה מנמיך שיטתית. */
+export function outlineArea(pts: GeoPt[]): number {
+  if (pts.length < 3) return 0
+  const rad = Math.PI / 180
+  const lat0 = pts.reduce((s2, p) => s2 + p.lat, 0) / pts.length
+  const mx = 111320 * Math.cos(lat0 * rad), my = 110540
+  let a = 0
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const xi = pts[i].lon * mx, yi = pts[i].lat * my
+    const xj = pts[j].lon * mx, yj = pts[j].lat * my
+    a += xj * yi - xi * yj
+  }
+  return Math.abs(a / 2)
+}
+
 /** מרחק קרקע אמיתי בין שתי נקודות. משמש גם בתווית על הסקיצה וגם בטבלה,
  *  כדי ששני המקומות יראו בדיוק את אותו מספר. גיאודזי ולא פיקסלים×קנה-מידה:
  *  מדויק יותר, ולא תלוי ברינדור הנוכחי. */
@@ -35,6 +57,7 @@ export interface OverlayBuilding {
   poly_px?: number[][]
 }
 
+export const OUT_FILL = 'rgba(220, 38, 38, 0.30)'
 export const SEL_FILL = 'rgba(220, 38, 38, 0.28)'
 export const SEL_STROKE = '#B91C1C'
 export const CAND = '#F59E0B'
@@ -53,6 +76,14 @@ export function makeProj(p: Proj) {
       lat: p.center_lat + (y - cy) * p.deg_per_px_lat,
       lon: p.center_lon + (x - cx) * p.deg_per_px_lon,
     }),
+  }
+}
+
+function drawBtn(primary: boolean): React.CSSProperties {
+  return {
+    padding: '6px 12px', borderRadius: 16, cursor: 'pointer', fontFamily: 'inherit',
+    fontSize: 12.5, fontWeight: 800, border: '1px solid ' + (primary ? '#1A5A2A' : 'rgba(255,255,255,0.35)'),
+    background: primary ? '#1A5A2A' : 'rgba(0,0,0,0.7)', color: '#fff',
   }
 }
 
@@ -98,6 +129,23 @@ function BuildingTag({ x, y, n, s }: { x: number; y: number; n: number; s: numbe
   )
 }
 
+/** תג מתאר משורטט — אדום וממוספר 1,2,3. הפרדת צבע מכוונת: אדום = מבנה
+ *  אסבסט (כמו בטבלה שלו), כחול מ1/מ2 = שכן. שתי מערכות מספור על אותה
+ *  סקיצה מתבלבלות בלי הפרדה ויזואלית. */
+function OutlineTag({ x, y, n, area, s }: { x: number; y: number; n: number; area: number; s: number }) {
+  const txt = `${n} · ${Math.round(area).toLocaleString('he-IL')} מ״ר`
+  const w = txt.length * 11 * s + 16 * s, h = 26 * s
+  return (
+    <g>
+      <rect x={x - w / 2} y={y - h / 2} width={w} height={h} rx={5 * s}
+        fill="rgba(255,255,255,0.93)" stroke={SEL_STROKE} strokeWidth={1.6 * s} />
+      <text x={x} y={y} textAnchor="middle" dominantBaseline="central"
+        fontSize={15 * s} fontWeight={800} fill="#8E1B27"
+        fontFamily="system-ui, -apple-system, sans-serif">{txt}</text>
+    </g>
+  )
+}
+
 /** תווית מרחק באמצע הקו, מסובבת בזווית הקו ובלי להתהפך. */
 function MeasureLabel({ ax, ay, bx, by, text, s, n }: {
   ax: number; ay: number; bx: number; by: number; text: string; s: number; n?: number
@@ -130,16 +178,21 @@ export interface OverlayProps {
   selected: Set<string>
   measures: Measure[]
   /** אינטראקטיבי רק ב-Lightbox; הגרסה בדף היא תצוגה בלבד */
-  mode?: 'pan' | 'select' | 'measure'
+  mode?: 'pan' | 'select' | 'measure' | 'draw'
+  outlines?: Outline[]
   onToggle?: (osmId: string) => void
   onAddMeasure?: (m: Omit<Measure, 'id'>) => void
+  onAddOutline?: (pts: GeoPt[]) => void
+  /** מדווח כמה נקודות יש בשרטוט שבתהליך, כדי שהסרגל יידע להציג
+   *  "סגור פוליגון" ו-Escape יידע לבטל אותו לפני שהוא סוגר משהו אחר */
+  onDraftChange?: (n: number) => void
   /** מדווח החוצה אם יש מדידה תלויה, כדי ש-Escape ידע לבטל רק אותה */
   onPendingChange?: (pending: boolean) => void
 }
 
 export default function SketchOverlay({
-  width, height, metersPerPx, proj, buildings, selected, measures,
-  mode = 'pan', onToggle, onAddMeasure, onPendingChange,
+  width, height, metersPerPx, proj, buildings, selected, measures, outlines = [],
+  mode = 'pan', onToggle, onAddMeasure, onAddOutline, onPendingChange, onDraftChange,
 }: OverlayProps) {
   const svgRef = useRef<SVGSVGElement>(null)
   const P = makeProj(proj)
@@ -148,7 +201,24 @@ export default function SketchOverlay({
 
   const [drag, setDrag] = useState<{ a: [number, number]; b: [number, number] } | null>(null)
   const [cands, setCands] = useState<{ at: [number, number]; ids: string[] } | null>(null)
-  const interactive = mode === 'select' || mode === 'measure'
+  const [draft, setDraft] = useState<[number, number][]>([])
+  const interactive = mode === 'select' || mode === 'measure' || mode === 'draw'
+
+  // שרטוט הוא לחיצות ולא גרירה: מניחים פינות מדויקות, והגרירה כבר תפוסה
+  // למדידה. closeDraft נחשף כלפי מעלה דרך onDraftChange + מפתח cancelSeq.
+  function addVertex(x: number, y: number) {
+    const next: [number, number][] = [...draft, [x, y]]
+    setDraft(next); onDraftChange?.(next.length)
+  }
+  function closeDraft() {
+    if (draft.length >= 3) onAddOutline?.(draft.map(([x, y]) => P.toGeo(x, y)))
+    setDraft([]); onDraftChange?.(0)
+  }
+  function undoVertex() {
+    const next = draft.slice(0, -1)
+    setDraft(next); onDraftChange?.(next.length)
+  }
+
 
   /** מיקום מצביע → קואורדינטות ה-viewBox. getScreenCTM מטפל בזום/הזזה
    *  של ה-Lightbox ובכל scale של הדפדפן, ולכן אין כאן חשבון ידני. */
@@ -183,6 +253,7 @@ export default function SketchOverlay({
     e.stopPropagation()
     const [x, y] = at(e)
     if (mode === 'select') { pickAt(x, y); return }
+    if (mode === 'draw') { addVertex(x, y); return }
     ;(e.target as Element).setPointerCapture?.(e.pointerId)
     setDrag({ a: [x, y], b: [x, y] })
     onPendingChange?.(true)
@@ -232,6 +303,31 @@ export default function SketchOverlay({
           )
         })}
 
+        {outlines.map((o, i) => {
+          const pts = o.pts.map(g => P.toPx(g))
+          const cx2 = pts.reduce((t, q) => t + q[0], 0) / pts.length
+          const cy2 = pts.reduce((t, q) => t + q[1], 0) / pts.length
+          return (
+            <g key={o.id}>
+              <polygon points={pts.map(q => `${q[0]},${q[1]}`).join(' ')}
+                fill={OUT_FILL} stroke={SEL_STROKE} strokeWidth={2.6 * s} strokeLinejoin="round" />
+              <OutlineTag x={cx2} y={cy2} n={i + 1} area={outlineArea(o.pts)} s={s} />
+            </g>
+          )
+        })}
+
+        {draft.length > 0 && (
+          <g>
+            <polyline points={draft.map(q => `${q[0]},${q[1]}`).join(' ')}
+              fill={draft.length > 2 ? OUT_FILL : 'none'} stroke={SEL_STROKE}
+              strokeWidth={2.6 * s} strokeDasharray={`${7 * s} ${5 * s}`} strokeLinejoin="round" />
+            {draft.map((q, i) => (
+              <circle key={i} cx={q[0]} cy={q[1]} r={5 * s} fill="#fff"
+                stroke={SEL_STROKE} strokeWidth={2 * s} />
+            ))}
+          </g>
+        )}
+
         {measures.map((m, i) => {
           const [ax, ay] = P.toPx(m.a), [bx, by] = P.toPx(m.b)
           return (
@@ -255,6 +351,23 @@ export default function SketchOverlay({
           </g>
         )}
       </svg>
+
+      {mode === 'draw' && (
+        <div style={{ position: 'absolute', top: 10, left: 0, right: 0, display: 'flex',
+          gap: 8, justifyContent: 'center', flexWrap: 'wrap', direction: 'rtl', zIndex: 6 }}>
+          <span style={{ background: 'rgba(0,0,0,0.75)', color: '#fff', fontSize: 12.5,
+            fontWeight: 700, padding: '6px 11px', borderRadius: 16 }}>
+            {draft.length === 0 ? 'לחץ על פינות המבנה'
+              : `${draft.length} נקודות${draft.length < 3 ? ' — צריך לפחות 3' : ''}`}
+          </span>
+          {draft.length > 0 && (
+            <button type="button" onClick={undoVertex} style={drawBtn(false)}>↶ בטל נקודה</button>
+          )}
+          {draft.length >= 3 && (
+            <button type="button" onClick={closeDraft} style={drawBtn(true)}>✓ סגור פוליגון</button>
+          )}
+        </div>
+      )}
 
       {/* תפריט אי-ודאות — HTML ולא SVG, כדי שיישאר קריא בכל זום */}
       {cands && (
