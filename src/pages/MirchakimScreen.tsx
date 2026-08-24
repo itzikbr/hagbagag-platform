@@ -209,6 +209,7 @@ export default function MirchakimScreen() {
   // המפה היא שלב אישור בין הקלט לחישוב. כל שלוש הלשוניות מייצרות נקודת
   // פתיחה, והמשתמש מכייל אותה ויזואלית לפני שמשלמים 40-200 שניות רינדור.
   const [pickAt, setPickAt] = useState<{ lat: number; lon: number; label: string | null } | null>(null)
+  const [gpsBusy, setGpsBusy] = useState(false)
   const [ocrBusy, setOcrBusy] = useState(false)
   const [ocrMsg, setOcrMsg] = useState<{ ok: boolean; text: string } | null>(null)
   const shotInput = useRef<HTMLInputElement>(null)
@@ -268,6 +269,31 @@ export default function MirchakimScreen() {
 
   // מדרג ההרחבה. כל הכפלה מרבעת את מספר האריחים, לכן צעדים ולא רציף.
   const RADIUS_STEPS = [50, 75, 100, 150, 250, 400, 600, 900, 1200]
+
+  /** נקודת פתיחה רביעית — GPS של המכשיר. אנשי שטח לא צריכים כתובת/ITM
+   *  כלל: הם עומדים במקום, ואז מכוונים את הצלב במפה בדיוק כמו בשלוש
+   *  השיטות האחרות. הדיוק הגס של GPS (5-15 מ׳ בשטח פתוח) הוא בדיוק
+   *  מה שהמפה נועדה לתקן — לא צריך דיוק גבוה יותר בשלב הזה. */
+  function useMyLocation() {
+    if (!navigator.geolocation) {
+      setErr({ message: 'הדפדפן הזה לא תומך במיקום. הזן כתובת או ITM.' })
+      return
+    }
+    setGpsBusy(true); setErr(null)
+    navigator.geolocation.getCurrentPosition(
+      pos => { setGpsBusy(false); openPicker(pos.coords.latitude, pos.coords.longitude) },
+      e => {
+        setGpsBusy(false)
+        const msg = e.code === e.PERMISSION_DENIED
+          ? 'לא ניתנה הרשאת מיקום. אפשר במקום זה להזין כתובת או ITM, או לאשר הרשאה בהגדרות הדפדפן.'
+          : e.code === e.TIMEOUT
+          ? 'קליטת ה-GPS ארכה יותר מדי (אות חלש?). נסה שוב באזור פתוח, או הזן כתובת/ITM.'
+          : 'לא הצלחנו לקבוע מיקום. הזן כתובת או ITM.'
+        setErr({ message: msg })
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    )
+  }
 
   function openPicker(la: number, lo: number) {
     setPickAt({ lat: la, lon: lo, label: label.trim() || address.trim() || null })
@@ -635,6 +661,13 @@ export default function MirchakimScreen() {
               </button>
             )
           })()}
+
+          <button type="button" onClick={useMyLocation} disabled={gpsBusy || busy}
+            style={{ width: '100%', marginTop: 10, padding: '11px 0', borderRadius: 10, cursor: gpsBusy ? 'default' : 'pointer',
+              border: `1px solid ${gpsBusy ? '#bbb' : '#1A5FAD'}`, background: '#fff',
+              color: gpsBusy ? '#999' : '#1A5FAD', fontSize: 14, fontWeight: 700, fontFamily: 'inherit' }}>
+            {gpsBusy ? 'מאתר מיקום…' : '📍 השתמש במיקום שלי'}
+          </button>
 
           <button type="button" onClick={() => void (method === 'address' ? findAddress() : startFromItm())} disabled={busy}
             style={{ width: '100%', marginTop: 12, padding: '12px 0', borderRadius: 24, border: 'none',
