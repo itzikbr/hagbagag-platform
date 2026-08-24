@@ -1480,7 +1480,7 @@ function Lightbox({ src, onClose, res, selected, measures, outlines, onToggle, o
                touchAction: 'none', overscrollBehavior: 'contain' }}
       ref={boxRef}
       onDoubleClick={() => { if (mode === 'pan') zoomTo(z !== 1 ? 1 : 3) }}
-      onPointerDown={e => { if (mode === 'pan' && z > 1) drag.current = { x: e.clientX, y: e.clientY, tx, ty } }}
+      onPointerDown={e => { if (mode === 'pan') drag.current = { x: e.clientX, y: e.clientY, tx, ty } }}
       onPointerMove={e => {
         if (!drag.current) return
         setTx(drag.current.tx + (e.clientX - drag.current.x))
@@ -1490,12 +1490,17 @@ function Lightbox({ src, onClose, res, selected, measures, outlines, onToggle, o
     >
       {/* ה-transform עבר מהתמונה למכל, כדי שה-SVG יזוז ויתקרב יחד איתה
           ויישאר מיושר פיקסל-לפיקסל בכל זום. */}
-      <div style={{ position: 'relative', display: 'inline-block', maxWidth: '100%', maxHeight: '100%',
+      {/* width/height:100% + objectFit במקום maxWidth/maxHeight על עטיפה
+          עם גובה auto: אחוזי-גובה לא נפתרים נגד אב שגובהו auto (כלל CSS
+          ותיק), אז maxHeight:'100%' פשוט לא עשה כלום. במסך רחב (דסקטופ)
+          תמונה מרובעת (1900×1900) נמתחה לרוחב המסך המלא ועלתה על הגובה
+          שלו ב-60% — שליש עליון ותחתון פשוט נחתכו מחוץ לתצוגה. */}
+      <div style={{ position: 'relative', width: '100%', height: '100%',
                     transform: `translate(${tx}px, ${ty}px) scale(${z})`, transformOrigin: 'center center',
                     transition: drag.current ? 'none' : 'transform 0.08s linear' }}>
         <img src={src} alt="תצלום אווירי — תצוגה מוגדלת" draggable={false}
-          style={{ display: 'block', maxWidth: '100%', maxHeight: '100%',
-                   cursor: mode === 'pan' ? (z > 1 ? 'grab' : 'zoom-in') : 'default', userSelect: 'none' }} />
+          style={{ display: 'block', width: '100%', height: '100%', objectFit: 'contain',
+                   cursor: mode === 'pan' ? 'grab' : 'default', userSelect: 'none' }} />
         {proj && (
           <SketchOverlay key={cancelSeq} width={iw} height={ih}
             metersPerPx={res.image_meta.meters_per_px} proj={proj}
@@ -1546,7 +1551,12 @@ function Lightbox({ src, onClose, res, selected, measures, outlines, onToggle, o
             )}
           </>
         )}
-        {mode === 'draw' && outlines.length > 0 && draftPts === 0 && (
+        {/* גם שרטוט חופשי וגם מלבן מהיר כותבים לאותה רשימת outlines —
+            הכפתור היה מוגבל ל-draw בלבד, אז מתאר שנוצר במלבן מהיר לא
+            היה ניתן למחיקה בלי לעבור למצב אחר כדי למצוא את הכפתור.
+            draftPts מגיע מאותו onDraftChange שגם rect וגם draw מדווחים
+            אליו, ולכן ==0 נכון לשני המצבים כאחד — לא צריך דגל נפרד. */}
+        {(mode === 'draw' || mode === 'rect') && outlines.length > 0 && draftPts === 0 && (
           <button type="button" onClick={onUndoOutline} style={lbBtn}>↶ בטל מתאר אחרון</button>
         )}
         {mode === 'measure' && measures.length > 0 && (
