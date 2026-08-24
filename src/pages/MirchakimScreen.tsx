@@ -171,6 +171,7 @@ export default function MirchakimScreen() {
   const [sheets, setSheets] = useState<SheetOpt[]>([])
   const printRef = useRef<HTMLDivElement>(null)
   const distTableRef = useRef<HTMLDivElement>(null)
+  const asbTableRef = useRef<HTMLDivElement>(null)
   const [zoomOpen, setZoomOpen] = useState(false)
   const [radiusM, setRadiusM] = useState('')
 
@@ -839,6 +840,7 @@ export default function MirchakimScreen() {
             </div>
 
             {/* ── טבלה 1: מבנים עם אסבסט ── */}
+            <div ref={asbTableRef}>
             <Section title="מבנים עם אסבסט" badge={String(asbRows.length)}
               action={<EditToggle on={editAsb} onClick={() => setEditAsb(!editAsb)} />}>
               {asbRows.length > 0 && (() => {
@@ -972,6 +974,7 @@ export default function MirchakimScreen() {
                 שחוסמים בדיקה של חלק מהתבניות.
               </div>
             </Section>
+            </div>
 
             {/* ── טבלה 2: מרחקים ממבנים אחרים ──
                 השורות הן הקווים שסומנו ידנית על התצלום: קו = שורה, אותו
@@ -1187,6 +1190,18 @@ export default function MirchakimScreen() {
             // הגלילה אחרי סגירת הלייטבוקס — הטבלה עדיין לא במקומה באותו טיק
             setTimeout(() => distTableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 120)
           }}
+          onFinishOutline={() => {
+            // שרטוט המתאר על התצלום לא ממלא לבד את טבלת "מבנים עם אסבסט" —
+            // השטח המצולם הוא היטל אופקי ולא שווה לשטח הגג האמיתי (גג משופע),
+            // אז אי אפשר להשלים את השורה אוטומטית. מה שכן חסר עד עכשיו היה
+            // הכפתור שמעביר בפועל לטבלה כדי למלא אותה, כמו שיש למדידת מרחק.
+            setZoomOpen(false)
+            setAsbRows(rs => rs.length >= outlines.length
+              ? rs
+              : [...rs, ...Array.from({ length: outlines.length - rs.length }, () => emptyAsbRow())])
+            setEditAsb(true); setFormDirty(true)
+            setTimeout(() => asbTableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 120)
+          }}
           onUndo={() => { setMeasures(m => m.slice(0, -1)); setFormDirty(true) }}
           onClearMeasures={() => { setMeasures([]); setFormDirty(true) }}
           onClearSelection={() => { setSelectedIds(new Set()); setFormDirty(true) }} />
@@ -1364,7 +1379,7 @@ function AddBtn({ onClick, text }: { onClick: () => void; text: string }) {
 // כך שההתנהגות זהה בכל מכשיר.
 type LbMode = 'pan' | 'select' | 'measure' | 'draw' | 'rect'
 
-function Lightbox({ src, onClose, res, selected, measures, outlines, onToggle, onAddMeasure, onAddOutline, onUndoOutline, onFinish, onUndo, onClearMeasures, onClearSelection }: {
+function Lightbox({ src, onClose, res, selected, measures, outlines, onToggle, onAddMeasure, onAddOutline, onUndoOutline, onFinish, onFinishOutline, onUndo, onClearMeasures, onClearSelection }: {
   src: string; onClose: () => void
   res: Result
   selected: Set<string>
@@ -1375,6 +1390,7 @@ function Lightbox({ src, onClose, res, selected, measures, outlines, onToggle, o
   onAddOutline: (pts: GeoPt[]) => void
   onUndoOutline: () => void
   onFinish: () => void
+  onFinishOutline: () => void
   onUndo: () => void
   onClearMeasures: () => void
   onClearSelection: () => void
@@ -1557,7 +1573,16 @@ function Lightbox({ src, onClose, res, selected, measures, outlines, onToggle, o
             draftPts מגיע מאותו onDraftChange שגם rect וגם draw מדווחים
             אליו, ולכן ==0 נכון לשני המצבים כאחד — לא צריך דגל נפרד. */}
         {(mode === 'draw' || mode === 'rect') && outlines.length > 0 && draftPts === 0 && (
-          <button type="button" onClick={onUndoOutline} style={lbBtn}>↶ בטל מתאר אחרון</button>
+          <>
+            <button type="button" onClick={onUndoOutline} style={lbBtn}>↶ בטל מתאר אחרון</button>
+            {/* מקביל ל"✓ סיום · לטבלה" של מדידה — בלי כפתור כזה לא היה ברור
+                איך עוברים מסימון המבנה על התצלום למילוי טבלת "מבנים עם
+                אסבסט", וגם לא היה מובטח שהטבלה תיפתח עם שורה מוכנה למילוי. */}
+            <button type="button" onClick={onFinishOutline}
+              style={{ ...lbBtn, background: '#1A5A2A', borderColor: '#1A5A2A', fontWeight: 800 }}>
+              ✓ סיום · למבנים ({outlines.length})
+            </button>
+          </>
         )}
         {mode === 'measure' && measures.length > 0 && (
           <>
