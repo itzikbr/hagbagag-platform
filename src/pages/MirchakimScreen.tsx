@@ -1362,7 +1362,7 @@ function AddBtn({ onClick, text }: { onClick: () => void; text: string }) {
 // ב-iOS ההתנהגות הנייטיבית בתוך div אינה עקבית. כאן pinch מחושב ידנית
 // ממרחק שתי האצבעות, ובנוסף יש גרירה, לחיצה כפולה, גלגלת וכפתורים —
 // כך שההתנהגות זהה בכל מכשיר.
-type LbMode = 'pan' | 'select' | 'measure' | 'draw'
+type LbMode = 'pan' | 'select' | 'measure' | 'draw' | 'rect'
 
 function Lightbox({ src, onClose, res, selected, measures, outlines, onToggle, onAddMeasure, onAddOutline, onUndoOutline, onFinish, onUndo, onClearMeasures, onClearSelection }: {
   src: string; onClose: () => void
@@ -1530,7 +1530,7 @@ function Lightbox({ src, onClose, res, selected, measures, outlines, onToggle, o
             ⚠️ הסקיצה חושבה לפני עדכון השרת — הרץ חישוב מחדש כדי לסמן מבנים
           </span>
         )}
-        {proj && ([['pan', '🖐 ניווט'], ['select', '🏠 בחירה'], ['draw', '✏️ שרטוט מבנה'], ['measure', '📏 מדוד מרחק']] as [LbMode, string][])
+        {proj && ([['pan', '🖐 ניווט'], ['select', '🏠 בחירה'], ['rect', '▭ מלבן מהיר'], ['draw', '✏️ שרטוט חופשי'], ['measure', '📏 מדוד מרחק']] as [LbMode, string][])
           .map(([m, t]) => (
           <button key={m} type="button" onClick={() => setMode(m)}
             style={{ ...lbBtn, background: mode === m ? '#2563EB' : 'rgba(255,255,255,0.14)',
@@ -1565,6 +1565,7 @@ function Lightbox({ src, onClose, res, selected, measures, outlines, onToggle, o
 
       <div style={{ textAlign: 'center', color: 'rgba(255,255,255,0.75)', fontSize: 12, padding: '0 12px 12px' }}>
         {mode === 'select' && 'לחץ על מבנה כדי לבחור · לחיצה נוספת מבטלת · Escape ליציאה'}
+        {mode === 'rect' && 'לחץ 2 פעמים על קיר אחד של המבנה, ואז גרור לקצה הנגדי — הזווית הישרה נכפית אוטומטית · Escape מבטל'}
         {mode === 'draw' && 'לחץ על כל פינה של המבנה, ואז "סגור פוליגון" · Escape מבטל שרטוט בתהליך'}
         {mode === 'measure' && 'התחל מהמבנה שלך וגרור אל השכן — התג מ1, מ2 מונח בנקודת השחרור'}
         {mode === 'pan' && 'גלגלת או צביטה · + / − / 0 במקלדת · גרירה להזזה · לחיצה כפולה למעבר מהיר · טווח 0.25×–8×'}

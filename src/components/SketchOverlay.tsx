@@ -178,7 +178,7 @@ export interface OverlayProps {
   selected: Set<string>
   measures: Measure[]
   /** אינטראקטיבי רק ב-Lightbox; הגרסה בדף היא תצוגה בלבד */
-  mode?: 'pan' | 'select' | 'measure' | 'draw'
+  mode?: 'pan' | 'select' | 'measure' | 'draw' | 'rect'
   outlines?: Outline[]
   onToggle?: (osmId: string) => void
   onAddMeasure?: (m: Omit<Measure, 'id'>) => void
@@ -202,7 +202,26 @@ export default function SketchOverlay({
   const [drag, setDrag] = useState<{ a: [number, number]; b: [number, number] } | null>(null)
   const [cands, setCands] = useState<{ at: [number, number]; ids: string[] } | null>(null)
   const [draft, setDraft] = useState<[number, number][]>([])
-  const interactive = mode === 'select' || mode === 'measure' || mode === 'draw'
+  // מלבן מהיר: 3 לחיצות — שתי הראשונות קובעות קיר אחד (כיוון+אורך),
+  // השלישית קובעת רק את העומק בניצב אליו. הזווית הישרה נכפית במתמטיקה
+  // (היטל על הניצב לקיר) ולא תלויה בדיוק הלחיצה השלישית — 95% מהמבנים
+  // הם מלבנים, וזה חוסך לחיצה אחת וגם מונע פינה רביעית לא-ישרה שנגרמת
+  // ממילימטר של סטייה באצבע.
+  const [rectPts, setRectPts] = useState<[number, number][]>([])   // [] | [P1] | [P1,P2]
+  const [rectDrag, setRectDrag] = useState<[number, number] | null>(null)
+  const interactive = mode === 'select' || mode === 'measure' || mode === 'draw' || mode === 'rect'
+
+  function rectCorners(p1: [number, number], p2: [number, number], p3raw: [number, number]) {
+    const ex = p2[0] - p1[0], ey = p2[1] - p1[1]
+    const elen = Math.hypot(ex, ey) || 1
+    const ux = ex / elen, uy = ey / elen
+    const nx = -uy, ny = ux                                     // ניצב ליחידת הקיר
+    const depth = (p3raw[0] - p2[0]) * nx + (p3raw[1] - p2[1]) * ny
+    const p3: [number, number] = [p2[0] + nx * depth, p2[1] + ny * depth]
+    const p4: [number, number] = [p1[0] + nx * depth, p1[1] + ny * depth]
+    return [p1, p2, p3, p4] as [number, number][]
+  }
+  function resetRect() { setRectPts([]); setRectDrag(null); onDraftChange?.(0) }
 
   // שרטוט הוא לחיצות ולא גרירה: מניחים פינות מדויקות, והגרירה כבר תפוסה
   // למדידה. closeDraft נחשף כלפי מעלה דרך onDraftChange + מפתח cancelSeq.
@@ -285,6 +304,7 @@ export default function SketchOverlay({
   const gestureIsMulti = useRef(false)
   const lastVertexPointer = useRef<number | null>(null)
   const lastToggledPointer = useRef<{ pointerId: number; osmId: string } | null>(null)
+  const lastRectTapPointer = useRef<number | null>(null)
 
   function onDown(e: React.PointerEvent) {
     if (!interactive) return
@@ -297,6 +317,13 @@ export default function SketchOverlay({
       if (mode === 'draw' && lastVertexPointer.current !== null) { undoVertex(); lastVertexPointer.current = null }
       if (mode === 'measure' && drag) { setDrag(null); onPendingChange?.(false) }
       if (mode === 'select' && lastToggledPointer.current) { onToggle?.(lastToggledPointer.current.osmId); lastToggledPointer.current = null }
+      if (mode === 'rect') {
+        if (rectDrag) { setRectDrag(null); onPendingChange?.(false) }
+        else if (lastRectTapPointer.current !== null) {
+          setRectPts(prev => { const next = prev.slice(0, -1); onDraftChange?.(next.length); return next })
+          lastRectTapPointer.current = null
+        }
+      }
       return
     }
     if (gestureIsMulti.current) return         // אצבע שנשארה מצביטה קודמת
@@ -308,12 +335,26 @@ export default function SketchOverlay({
       return
     }
     if (mode === 'draw') { addVertex(x, y); lastVertexPointer.current = e.pointerId; return }
+    if (mode === 'rect') {
+      if (rectPts.length < 2) {
+        setRectPts(prev => { const next: [number, number][] = [...prev, [x, y]]; onDraftChange?.(next.length); return next })
+        lastRectTapPointer.current = e.pointerId
+        return
+      }
+      // הקיר כבר קבוע — זו תחילת גרירת העומק, עם תצוגה חיה של המלבן
+      ;(e.target as Element).setPointerCapture?.(e.pointerId)
+      setRectDrag([x, y])
+      onPendingChange?.(true)
+      return
+    }
     ;(e.target as Element).setPointerCapture?.(e.pointerId)
     setDrag({ a: [x, y], b: [x, y] })
     onPendingChange?.(true)
   }
   function onMove(e: React.PointerEvent) {
-    if (gestureIsMulti.current || mode !== 'measure' || !drag) return
+    if (gestureIsMulti.current) return
+    if (mode === 'rect' && rectDrag) { e.stopPropagation(); setRectDrag(at(e)); return }
+    if (mode !== 'measure' || !drag) return
     e.stopPropagation()
     setDrag({ a: drag.a, b: at(e) })
   }
@@ -323,7 +364,16 @@ export default function SketchOverlay({
   }
   function onUp(e: React.PointerEvent) {
     endPointer(e.pointerId)
-    if (gestureIsMulti.current || mode !== 'measure' || !drag) return
+    if (gestureIsMulti.current) return
+    if (mode === 'rect' && rectDrag && rectPts.length === 2) {
+      e.stopPropagation()
+      const corners = rectCorners(rectPts[0], rectPts[1], at(e))
+      onPendingChange?.(false)
+      onAddOutline?.(corners.map(([px, py]) => P.toGeo(px, py)))
+      resetRect()
+      return
+    }
+    if (mode !== 'measure' || !drag) return
     e.stopPropagation()
     const b = at(e)
     const moved = Math.hypot(b[0] - drag.a[0], b[1] - drag.a[1])
@@ -343,7 +393,7 @@ export default function SketchOverlay({
           position: 'absolute', inset: 0, width: '100%', height: '100%',
           pointerEvents: interactive ? 'auto' : 'none',
           touchAction: interactive ? 'none' : undefined,
-          cursor: mode === 'select' ? 'pointer' : mode === 'measure' ? 'crosshair' : undefined,
+          cursor: mode === 'select' ? 'pointer' : mode === 'measure' || mode === 'rect' ? 'crosshair' : undefined,
         }}
         onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp}
         onPointerCancel={e => { endPointer(e.pointerId); setDrag(null); onPendingChange?.(false) }}
@@ -383,6 +433,27 @@ export default function SketchOverlay({
             {draft.map((q, i) => (
               <circle key={i} cx={q[0]} cy={q[1]} r={5 * s} fill="#fff"
                 stroke={SEL_STROKE} strokeWidth={2 * s} />
+            ))}
+          </g>
+        )}
+
+        {/* מלבן מהיר — קיר קבוע אחרי 2 לחיצות, ותצוגה חיה בזמן גרירת העומק */}
+        {rectPts.length > 0 && (
+          <g>
+            {rectPts.length === 2 && !rectDrag && (
+              <line x1={rectPts[0][0]} y1={rectPts[0][1]} x2={rectPts[1][0]} y2={rectPts[1][1]}
+                stroke={SEL_STROKE} strokeWidth={2.6 * s} strokeLinecap="round" />
+            )}
+            {rectPts.length === 2 && rectDrag && (() => {
+              const c = rectCorners(rectPts[0], rectPts[1], rectDrag)
+              return (
+                <polygon points={c.map(q => `${q[0]},${q[1]}`).join(' ')}
+                  fill={OUT_FILL} stroke={SEL_STROKE} strokeWidth={2.6 * s}
+                  strokeDasharray={`${7 * s} ${5 * s}`} strokeLinejoin="round" />
+              )
+            })()}
+            {rectPts.map((q, i) => (
+              <circle key={i} cx={q[0]} cy={q[1]} r={5 * s} fill="#fff" stroke={SEL_STROKE} strokeWidth={2 * s} />
             ))}
           </g>
         )}
