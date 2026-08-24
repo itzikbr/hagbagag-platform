@@ -6,7 +6,7 @@ import LocationPicker, { type PickedPoint } from '../components/LocationPicker'
 import {
   PERMIT_TYPES, PERMIT_INFO, DEFAULT_PERMIT_TYPE, permitDef, permitTiming,
   classifyBuilding, classColors, labTestsLabel, toNum, ASB_FORM_OPTS,
-  type PermitTypeKey, type LabTests,
+  type PermitTypeKey, type LabTests, type Classification,
 } from '../lib/asbestosPermit'
 
 // ── מרחקים למבנים סמוכים ─────────────────────────────────────────
@@ -88,6 +88,8 @@ interface AsbRow {
   lengthM: string
   coordX: string
   coordY: string
+  /** דריסה ידנית של "סיווג מוצע" — '' = אוטומטי לפי classifyBuilding. */
+  classOverride: PermitTypeKey | ''
   _rest: Record<string, unknown>
 }
 interface DistRow { id: string; name: string; distance_m: string }
@@ -98,17 +100,19 @@ const rowId = () => `r${++_rowSeq}`
 function emptyAsbRow(): AsbRow {
   return {
     id: rowId(), asbestosForm: '', structureType: '', roofSize: '', ceiling: 'אין',
-    demolition: false, labTests: null, weightKg: '', lengthM: '', coordX: '', coordY: '', _rest: {},
+    demolition: false, labTests: null, weightKg: '', lengthM: '', coordX: '', coordY: '',
+    classOverride: '', _rest: {},
   }
 }
 
 /** מבנה כפי שנשמר ב-work_content → שורת טבלה, בלי לאבד שדות לא-מוכרים. */
 function toRow(b: Record<string, unknown>): AsbRow {
   const known = new Set(['asbestosForm', 'structureType', 'roofSize', 'ceiling',
-                         'demolition', 'labTests', 'weightKg', 'lengthM', 'coordX', 'coordY'])
+                         'demolition', 'labTests', 'weightKg', 'lengthM', 'coordX', 'coordY', 'classOverride'])
   const rest: Record<string, unknown> = {}
   for (const k of Object.keys(b)) if (!known.has(k)) rest[k] = b[k]
   const lt = b.labTests
+  const ov = String(b.classOverride ?? '')
   return {
     id: rowId(),
     asbestosForm: String(b.asbestosForm ?? ''),
@@ -121,6 +125,7 @@ function toRow(b: Record<string, unknown>): AsbRow {
     lengthM: String(b.lengthM ?? ''),
     coordX: String(b.coordX ?? ''),
     coordY: String(b.coordY ?? ''),
+    classOverride: PERMIT_TYPES.some(p => p.key === ov) ? (ov as PermitTypeKey) : '',
     _rest: rest,
   }
 }
@@ -130,6 +135,12 @@ function fromRow(r: AsbRow): Record<string, unknown> {
   const { id: _id, _rest, ...fields } = r
   void _id
   return { ..._rest, ...fields }
+}
+
+/** הסיווג בפועל: דריסה ידנית אם הוגדרה, אחרת ההצעה האוטומטית. */
+function effectiveClass(r: AsbRow): Classification {
+  if (r.classOverride) return { key: r.classOverride, label: permitDef(r.classOverride).label, reason: 'נקבע ידנית', missing: [] }
+  return classifyBuilding(r)
 }
 
 /** מרכז כובד של כל השורות שיש להן X/Y — נקודת העיגון לסקיצה. */
@@ -845,7 +856,7 @@ export default function MirchakimScreen() {
               action={<EditToggle on={editAsb} onClick={() => setEditAsb(!editAsb)} />}>
               {asbRows.length > 0 && (() => {
                 const counts = asbRows.reduce<Record<string, number>>((a, r) => {
-                  const c = classifyBuilding(r); a[c.label] = (a[c.label] ?? 0) + 1; return a }, {})
+                  const c = effectiveClass(r); a[c.label] = (a[c.label] ?? 0) + 1; return a }, {})
                 return (
                   <div className="no-print" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center',
                     padding: '8px 12px', borderBottom: '1px solid #F6F4F2' }}>
@@ -916,7 +927,10 @@ export default function MirchakimScreen() {
                           <td style={{ ...td, fontVariantNumeric: 'tabular-nums' }} dir="ltr">{editAsb
                             ? <CellInp value={r.coordY} dir="ltr" onChange={v => patchRow(r.id, { coordY: v })} />
                             : (r.coordY || <span style={{ color: GREY }}>—</span>)}</td>
-                          <td style={td} className="no-print"><ClassTag row={r} /></td>
+                          <td style={td} className="no-print">
+                            <ClassTag row={r} edit={editAsb}
+                              onOverride={v => patchRow(r.id, { classOverride: v })} />
+                          </td>
                           {editAsb && (
                             <td style={td} className="no-print">
                               <DelBtn title={`מחק מבנה ${i + 1}`}
@@ -1331,17 +1345,29 @@ function LabTestsCell({ edit, value, onChange }: { edit: boolean; value: LabTest
   )
 }
 
-/** תג "סיווג מוצע" — תצוגה בלבד, לא נשמר ולא ניתן לדריסה פר-שורה. */
-function ClassTag({ row }: { row: AsbRow }) {
-  const c = classifyBuilding(row)
+/** תג "סיווג מוצע" — אוטומטי כברירת מחדל, ניתן לדריסה ידנית פר-שורה
+    (למשל כשהמשתמש יודע שהתבנית האוטומטית לא מתאימה למקרה הזה). */
+function ClassTag({ row, edit, onOverride }: { row: AsbRow; edit: boolean; onOverride: (v: PermitTypeKey | '') => void }) {
+  const c = effectiveClass(row)
   const col = classColors(c.key)
   const partial = c.missing.length > 0
-  return (
-    <span title={partial ? `${c.reason} · חסר: ${c.missing.join(', ')}` : c.reason}
+  const tag = (
+    <span title={row.classOverride ? 'נקבע ידנית' : (partial ? `${c.reason} · חסר: ${c.missing.join(', ')}` : c.reason)}
       style={{ display: 'inline-block', padding: '3px 8px', borderRadius: 20, fontSize: 11.5,
         fontWeight: 800, background: col.bg, color: col.fg, whiteSpace: 'nowrap' }}>
-      {c.label}{partial ? ' ?' : ''}
+      {c.label}{partial ? ' ?' : ''}{row.classOverride ? ' ✎' : ''}
     </span>
+  )
+  if (!edit) return tag
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'flex-start' }}>
+      {tag}
+      <select value={row.classOverride} onChange={e => onOverride(e.target.value as PermitTypeKey | '')}
+        style={{ ...cellInpStyle, minWidth: 92, fontSize: 11 }}>
+        <option value="">אוטומטי</option>
+        {PERMIT_TYPES.map(p => <option key={p.key} value={p.key}>{p.label}</option>)}
+      </select>
+    </div>
   )
 }
 
@@ -1491,7 +1517,11 @@ function Lightbox({ src, onClose, res, selected, measures, outlines, onToggle, o
 
   return (
     <div className="no-print"
-      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.94)', zIndex: 100,
+      // רקע חצי-שקוף (0.94) הראה מבעד אליו כ-6% מהעותק הסטטי של אותה
+      // תמונה (המורכב לצרכי הדפסה, יושב בעמוד עצמו במידה/מיקום אחרים
+      // מהמוגדל בלייטבוקס) — בזמן זום/גרירה זה נראה כ"רפרוף" כפול על
+      // התמונה. #000 מלא סוגר את הדליפה הזו כליל.
+      style={{ position: 'fixed', inset: 0, background: '#000', zIndex: 100,
                display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
                touchAction: 'none', overscrollBehavior: 'contain' }}
       ref={boxRef}
