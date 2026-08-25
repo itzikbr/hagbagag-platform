@@ -489,6 +489,21 @@ export default function MirchakimScreen() {
       setFormDirty(false)
       setFormState('idle')
       if (!rows.length) setFormMsg('לדף הביצוע הזה עדיין אין מבנים — הוסף אותם בטבלה למטה.')
+
+      // שחזור הסקיצה עצמה — בלי זה, פתיחת דף מקושר הציגה רק את הטבלאות
+      // (שוחזרו למעלה) בלי שום תצלום, כי res מעולם לא נטען מחדש. נקודת
+      // המוצא שנשמרה (origin) מריצה את אותו חישוב מחדש בדיוק כמו GPS/מפה.
+      const origin = wc?.mirchakim?.origin
+      if (origin?.lat != null && origin?.lon != null) {
+        if (origin.label) { setMethod('address'); setAddress(String(origin.label)) }
+        setLabel(String(origin.label ?? ''))
+        const savedRadiusNum = Number(wc?.mirchakim?.radius_m)
+        const savedRadius = Number.isFinite(savedRadiusNum) && savedRadiusNum > 0 ? savedRadiusNum : 50
+        setRadiusM(String(savedRadius))
+        // רדיוס תמיד מוגדר (לא undefined) בכוונה: run() עם undefined מאפס
+        // outlines/measures/selectedIds שזה עתה שוחזרו למעלה מהנתונים השמורים.
+        void run(savedRadius, { lat: Number(origin.lat), lon: Number(origin.lon) })
+      }
     })().catch(e => {
       if (cancelled) return
       setFormState('error')
@@ -532,6 +547,11 @@ export default function MirchakimScreen() {
         outlines: outlines.map(o => ({ pts: o.pts, name: o.name ?? '' })),
         image_id: res?.image_id ?? (wc.mirchakim?.image_id ?? null),
         radius_m: res ? radiusOf(res) : (wc.mirchakim?.radius_m ?? null),
+        // נקודת המוצא (כתובת/GPS) שממנה חושבה הסקיצה — בלעדיה, פתיחת הדף
+        // שוב (במשרד, במכשיר אחר) הציגה רק את הטבלאות. אין דרך לשחזר את
+        // התמונה בלי לדעת לאן לחזור, וזה לא היה שמור בשום מקום מובנה.
+        origin: res ? { lat: res.input.wgs84[0], lon: res.input.wgs84[1], label: res.input.label }
+                    : (wc.mirchakim?.origin ?? null),
         updated_at: new Date().toISOString(),
       }
       const newWc = { ...wc, blocks, workTypes, mirchakim }
