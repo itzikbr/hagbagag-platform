@@ -5,7 +5,7 @@ import SketchOverlay, { measureMeters, outlineArea, type Measure, type Outline, 
 import LocationPicker, { type PickedPoint } from '../components/LocationPicker'
 import {
   PERMIT_TYPES, PERMIT_INFO, DEFAULT_PERMIT_TYPE, permitDef, permitTiming,
-  classifyBuilding, classColors, labTestsLabel, toNum, ASB_FORM_OPTS,
+  classifyBuilding, classColors, labTestsLabel, toNum, hasHardCeiling, ASB_FORM_OPTS,
   type PermitTypeKey, type LabTests, type Classification,
 } from '../lib/asbestosPermit'
 
@@ -280,8 +280,13 @@ export default function MirchakimScreen() {
   const totalArea = asbRows.reduce((sum, r) => sum + (toNum(r.roofSize) ?? 0), 0)
   // עמודות אורך/משקל מוצגות רק כשיש בהן ערך או במצב עריכה — כדי שדף
   // הדפסה של פרויקט גגות רגיל לא יסחב שתי עמודות ריקות.
-  const showLen = editAsb || asbRows.some(r => toNum(r.lengthM) !== null)
-  const showKg = editAsb || asbRows.some(r => toNum(r.weightKg) !== null)
+  // "רלוונטי" = אותם תנאים בדיוק שקובעים אם השדה חוסם סיווג ב-missingFor:
+  // אורך רלוונטי לצנרת/תקרה קשיחה; משקל רלוונטי כל עוד סוג האסבסט לא
+  // נבחר (חריגת "מוצר שלם עד 700 ק"ג" לא תלויה בסוג). קיום נתון כבר
+  // מוזן תמיד שומר על הצגת העמודה, כדי שלא "נעלם" ערך שכבר הוקלד.
+  const showLen = asbRows.some(r =>
+    r.asbestosForm === 'צנרת' || r.asbestosForm === '' || hasHardCeiling(r.ceiling) || toNum(r.lengthM) !== null)
+  const showKg = asbRows.some(r => r.asbestosForm === '' || toNum(r.weightKg) !== null)
 
   // מדרג ההרחבה. כל הכפלה מרבעת את מספר האריחים, לכן צעדים ולא רציף.
   const RADIUS_STEPS = [50, 75, 100, 150, 250, 400, 600, 900, 1200]
@@ -1208,16 +1213,8 @@ export default function MirchakimScreen() {
             // הגלילה אחרי סגירת הלייטבוקס — הטבלה עדיין לא במקומה באותו טיק
             setTimeout(() => distTableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 120)
           }}
-          onFinishOutline={() => {
-            // יצירת השורה עצמה קורית כבר ב-addOutline (בסגירת המתאר) — כאן
-            // רק המעבר בפועל לטבלה, למי שרוצה לסיים ולמלא אותה מיד.
-            setZoomOpen(false)
-            setEditAsb(true)
-            setTimeout(() => asbTableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 120)
-          }}
           onUndo={() => { setMeasures(m => m.slice(0, -1)); setFormDirty(true) }}
-          onClearMeasures={() => { setMeasures([]); setFormDirty(true) }}
-          onClearSelection={() => { setSelectedIds(new Set()); setFormDirty(true) }} />
+          onClearMeasures={() => { setMeasures([]); setFormDirty(true) }} />
       )}
     </div>
   )
@@ -1402,9 +1399,13 @@ function AddBtn({ onClick, text }: { onClick: () => void; text: string }) {
 // ב-iOS ההתנהגות הנייטיבית בתוך div אינה עקבית. כאן pinch מחושב ידנית
 // ממרחק שתי האצבעות, ובנוסף יש גרירה, לחיצה כפולה, גלגלת וכפתורים —
 // כך שההתנהגות זהה בכל מכשיר.
-type LbMode = 'pan' | 'select' | 'measure' | 'draw' | 'rect'
+type LbMode = 'pan' | 'select' | 'measure' | 'draw'
+/** שני שלבים בלבד: קודם מסמנים מבנה/מבני אסבסט, אחר כך מודדים מרחקים.
+ *  'select' (תיוג מבנה שכן בלי קו) לא מוצג בסרגל היום — לא נמחק, רק לא
+ *  מחובר לאשף; אם יידרש שוב אפשר לחשוף אותו כמצב נוסף בתוך שלב המרחקים. */
+type LbStep = 'mark' | 'distances'
 
-function Lightbox({ src, onClose, res, selected, measures, outlines, onToggle, onAddMeasure, onAddOutline, onUndoOutline, onFinish, onFinishOutline, onUndo, onClearMeasures, onClearSelection }: {
+function Lightbox({ src, onClose, res, selected, measures, outlines, onToggle, onAddMeasure, onAddOutline, onUndoOutline, onFinish, onUndo, onClearMeasures }: {
   src: string; onClose: () => void
   res: Result
   selected: Set<string>
@@ -1415,15 +1416,16 @@ function Lightbox({ src, onClose, res, selected, measures, outlines, onToggle, o
   onAddOutline: (pts: GeoPt[]) => void
   onUndoOutline: () => void
   onFinish: () => void
-  onFinishOutline: () => void
   onUndo: () => void
   onClearMeasures: () => void
-  onClearSelection: () => void
 }) {
-  // שלושה מצבים בלעדיים. 'pan' הוא ברירת המחדל ומשמר את ההתנהגות הקיימת
-  // במדויק — גרירה מזיזה, Escape סוגר — ולכן אין רגרסיה למי שלא נכנס
-  // לסימון בכלל.
+  // אשף דו-שלבי: קודם מסמנים מבנה/מבני אסבסט, אחר כך מודדים מרחקים —
+  // בכל שלב מוצג רק הכלי הרלוונטי אליו, לא כל חמשת המצבים ביחד. 'pan'
+  // זמין בכל שלב (הוא ניווט, לא סימון). מעבר בין שלבים לא סוגר את
+  // הלייטבוקס — זה עדיין אותו סשן סימון רציף על אותה תמונה.
+  const [step, setStep] = useState<LbStep>('mark')
   const [mode, setMode] = useState<LbMode>('pan')
+  const [liveLen, setLiveLen] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
   const [draftPts, setDraftPts] = useState(0)
   const [cancelSeq, setCancelSeq] = useState(0)      // מאלץ איפוס מדידה תלויה
@@ -1552,9 +1554,32 @@ function Lightbox({ src, onClose, res, selected, measures, outlines, onToggle, o
             buildings={res.buildings} selected={selected} measures={measures}
             outlines={outlines} mode={mode} onToggle={onToggle} onAddMeasure={onAddMeasure}
             onAddOutline={onAddOutline} onPendingChange={setPending}
-            onDraftChange={setDraftPts} />
+            onDraftChange={setDraftPts} onMeasureLive={setLiveLen} />
         )}
       </div>
+
+      {mode === 'measure' && liveLen && (
+        // התצוגה החיה יושבת קבועה במרכז המסך, לא ליד הקו או האצבע —
+        // מספר שצמוד לקו נגרר נופל בדיוק מתחת לאצבע שגוררת אותו.
+        <div style={{ position: 'absolute', top: 58, left: 0, right: 0, display: 'flex',
+          justifyContent: 'center', zIndex: 6, pointerEvents: 'none' }}>
+          <span style={{ background: 'rgba(37,99,235,0.92)', color: '#fff', fontSize: 15,
+            fontWeight: 800, padding: '7px 16px', borderRadius: 18 }}>{liveLen}</span>
+        </div>
+      )}
+      {step === 'distances' && measures.length > 0 && (
+        // רשימת "מה כבר נמדד" בתוך הלייטבוקס עצמו — כדי שלא יצטרכו לצאת
+        // ולסגור כדי לבדוק מה כבר נמדד עד עכשיו.
+        <div style={{ position: 'absolute', top: 58, right: 12, display: 'flex', flexDirection: 'column',
+          gap: 4, zIndex: 6, alignItems: 'flex-end' }}>
+          {measures.map((m, i) => (
+            <span key={m.id} style={{ background: 'rgba(0,0,0,0.75)', color: '#fff', fontSize: 12,
+              fontWeight: 700, padding: '4px 10px', borderRadius: 14, whiteSpace: 'nowrap' }}>
+              מ{i + 1} · {measureMeters(m.a, m.b).toFixed(1)} מ׳
+            </span>
+          ))}
+        </div>
+      )}
 
       <div style={{ position: 'absolute', top: 12, left: 12, right: 12, display: 'flex',
                     alignItems: 'center', justifyContent: 'space-between', gap: 8, direction: 'rtl' }}>
@@ -1573,6 +1598,9 @@ function Lightbox({ src, onClose, res, selected, measures, outlines, onToggle, o
           וכפתורים שקופים מעליו היו בלתי קריאים. */}
       <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, paddingTop: 10,
                     background: 'linear-gradient(to top, rgba(0,0,0,0.92) 62%, rgba(0,0,0,0))' }}>
+      <div style={{ textAlign: 'center', color: '#fff', fontSize: 12.5, fontWeight: 800, padding: '0 12px 4px' }}>
+        {step === 'mark' ? '① סימון מבנה אסבסט' : '② מדידת מרחקים'}
+      </div>
       <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap',
                     direction: 'rtl', padding: '0 12px 8px' }}>
         {!proj && (
@@ -1580,36 +1608,31 @@ function Lightbox({ src, onClose, res, selected, measures, outlines, onToggle, o
             ⚠️ הסקיצה חושבה לפני עדכון השרת — הרץ חישוב מחדש כדי לסמן מבנים
           </span>
         )}
-        {proj && ([['pan', '🖐 ניווט'], ['select', '🏠 בחירה'], ['rect', '▭ מלבן מהיר'], ['draw', '✏️ שרטוט חופשי'], ['measure', '📏 מדוד מרחק']] as [LbMode, string][])
+        {proj && step === 'distances' && (
+          // "עריכה" תמיד זמינה לחזרה — זה מחליף את מה שהיה קודם מנגנון
+          // מעבר-מצבים חופשי: אם טעית או רוצה להוסיף עוד מבנה, חוזרים
+          // אחורה בלחיצה אחת במקום לחפש בין חמישה כפתורים.
+          <button type="button" onClick={() => { setStep('mark'); setMode('pan') }} style={lbBtn}>
+            ◀ חזרה לסימון מבנים
+          </button>
+        )}
+        {proj && (step === 'mark'
+          ? ([['pan', '🖐 ניווט'], ['draw', '✏️ שרטוט מבנה']] as [LbMode, string][])
+          : ([['pan', '🖐 ניווט'], ['measure', '📏 מדוד מרחק']] as [LbMode, string][]))
           .map(([m, t]) => (
           <button key={m} type="button" onClick={() => setMode(m)}
             style={{ ...lbBtn, background: mode === m ? '#2563EB' : 'rgba(255,255,255,0.14)',
                      borderColor: mode === m ? '#2563EB' : 'rgba(255,255,255,0.3)', fontWeight: 800 }}>{t}</button>
         ))}
-        {mode === 'select' && (
-          <>
-            <span style={{ color: '#fff', fontSize: 12.5, fontWeight: 700, alignSelf: 'center' }}>
-              {selected.size} מבנים נבחרו
-            </span>
-            {selected.size > 0 && (
-              <button type="button" onClick={onClearSelection} style={lbBtn}>נקה בחירה</button>
-            )}
-          </>
-        )}
-        {/* גם שרטוט חופשי וגם מלבן מהיר כותבים לאותה רשימת outlines —
-            הכפתור היה מוגבל ל-draw בלבד, אז מתאר שנוצר במלבן מהיר לא
-            היה ניתן למחיקה בלי לעבור למצב אחר כדי למצוא את הכפתור.
-            draftPts מגיע מאותו onDraftChange שגם rect וגם draw מדווחים
-            אליו, ולכן ==0 נכון לשני המצבים כאחד — לא צריך דגל נפרד. */}
-        {(mode === 'draw' || mode === 'rect') && outlines.length > 0 && draftPts === 0 && (
+        {mode === 'draw' && outlines.length > 0 && draftPts === 0 && (
           <>
             <button type="button" onClick={onUndoOutline} style={lbBtn}>↶ בטל מתאר אחרון</button>
-            {/* מקביל ל"✓ סיום · לטבלה" של מדידה — בלי כפתור כזה לא היה ברור
-                איך עוברים מסימון המבנה על התצלום למילוי טבלת "מבנים עם
-                אסבסט", וגם לא היה מובטח שהטבלה תיפתח עם שורה מוכנה למילוי. */}
-            <button type="button" onClick={onFinishOutline}
+            {/* לא סוגר את הלייטבוקס — רק מתקדם לשלב הבא באותו סשן. יצירת
+                השורה בטבלת "מבנים עם אסבסט" כבר קרתה ב-addOutline, ברגע
+                שהמתאר נסגר, לא כאן. */}
+            <button type="button" onClick={() => { setStep('distances'); setMode('measure') }}
               style={{ ...lbBtn, background: '#1A5A2A', borderColor: '#1A5A2A', fontWeight: 800 }}>
-              ✓ סיום · למבנים ({outlines.length})
+              ✓ סיום סימון ({outlines.length}) · למדידת מרחקים
             </button>
           </>
         )}
@@ -1628,9 +1651,7 @@ function Lightbox({ src, onClose, res, selected, measures, outlines, onToggle, o
       </div>
 
       <div style={{ textAlign: 'center', color: 'rgba(255,255,255,0.75)', fontSize: 12, padding: '0 12px 12px' }}>
-        {mode === 'select' && 'לחץ על מבנה כדי לבחור · לחיצה נוספת מבטלת · Escape ליציאה'}
-        {mode === 'rect' && 'לחץ 2 פעמים על קיר אחד של המבנה, ואז גרור לקצה הנגדי — הזווית הישרה נכפית אוטומטית · Escape מבטל'}
-        {mode === 'draw' && 'לחץ על כל פינה של המבנה, ואז "סגור פוליגון" · Escape מבטל שרטוט בתהליך'}
+        {mode === 'draw' && 'גע בכל פינה, זוז מעט לדייק ואז שחרר — ואז "סגור פוליגון" · Escape מבטל'}
         {mode === 'measure' && 'התחל מהמבנה שלך וגרור אל השכן — התג מ1, מ2 מונח בנקודת השחרור'}
         {mode === 'pan' && 'גלגלת או צביטה · + / − / 0 במקלדת · גרירה להזזה · לחיצה כפולה למעבר מהיר · טווח 0.25×–8×'}
       </div>

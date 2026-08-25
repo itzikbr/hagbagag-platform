@@ -35,7 +35,7 @@ export function outlineArea(pts: GeoPt[]): number {
   return Math.abs(a / 2)
 }
 
-/** מרחק קרקע אמיתי בין שתי נקודות. משמש גם בתווית על הסקיצה וגם בטבלה,
+/** מרחק קרקע אמיתי בין שתי נקודות. משמש גם לתצוגה חיה וגם בטבלה,
  *  כדי ששני המקומות יראו בדיוק את אותו מספר. גיאודזי ולא פיקסלים×קנה-מידה:
  *  מדויק יותר, ולא תלוי ברינדור הנוכחי. */
 export function measureMeters(a: GeoPt, b: GeoPt): number {
@@ -62,6 +62,12 @@ export const SEL_FILL = 'rgba(220, 38, 38, 0.28)'
 export const SEL_STROKE = '#B91C1C'
 export const CAND = '#F59E0B'
 export const MEAS = '#2563EB'
+
+/** פיקסלים (מסך) שהנקודה המוצגת "מורמת" מעל האצבע בזמן מיקום — אצבע
+ *  אמיתית מכסה כ-40-50 פיקסל סביב נקודת המגע, ומסתירה בדיוק את מה
+ *  שצריך לדייק שם. התזוזה נשמרת קבועה במרחב המסך (לא ה-viewBox), כדי
+ *  שתיראה זהה בכל רמת זום — ב-at() היא מופחתת לפני חלוקת קנה-המידה. */
+const LIFT_PX = 46
 
 /** היטל דו-כיווני מהמתאר שהשרת מחזיר. שתי כפולות לכל כיוון — לא מימוש
  *  Web Mercator שני. השרת הוא מקור האמת (ראו compose() ב-engine.py). */
@@ -116,7 +122,8 @@ export function distToPoly(x: number, y: number, poly: number[][]): number {
 
 /** תג המבנה בקצה הקו — מ1, מ2. זה המזהה היחיד של מבנה שכן: הוא מונח
  *  עליו בתצלום, ומופיע כאותו ערך בעמודת "מס׳" בטבלה. אין סימון נפרד
- *  למבנים שכנים; הקו הוא גם המדידה וגם ההצבעה. */
+ *  למבנים שכנים; הקו הוא גם המדידה וגם ההצבעה. בכוונה בלי מספר מ' עליו —
+ *  זה חי רק בטבלה, כדי שהסקיצה לא תיטען בטקסט. */
 function BuildingTag({ x, y, n, s }: { x: number; y: number; n: number; s: number }) {
   const r = 13 * s
   return (
@@ -146,30 +153,6 @@ function OutlineTag({ x, y, n, area, s }: { x: number; y: number; n: number; are
   )
 }
 
-/** תווית מרחק באמצע הקו, מסובבת בזווית הקו ובלי להתהפך. */
-function MeasureLabel({ ax, ay, bx, by, text, s, n }: {
-  ax: number; ay: number; bx: number; by: number; text: string; s: number; n?: number
-}) {
-  const mx = (ax + bx) / 2, my = (ay + by) / 2
-  let ang = (Math.atan2(by - ay, bx - ax) * 180) / Math.PI
-  if (ang > 90) ang -= 180
-  if (ang < -90) ang += 180
-  // הוגדל: אלה התוויות היחידות שנשארו אחרי שקווי המרחק של המנוע כובו,
-  // והן צריכות להיקרא גם בהקטנה ל-A4.
-  const full = text
-  const w = full.length * 12 * s + 18 * s
-  const h = 28 * s
-  return (
-    <g transform={`translate(${mx} ${my}) rotate(${ang})`}>
-      <rect x={-w / 2} y={-h / 2} width={w} height={h} rx={5 * s}
-        fill="rgba(255,255,255,0.93)" stroke={MEAS} strokeWidth={1.4 * s} />
-      <text x={0} y={0} textAnchor="middle" dominantBaseline="central"
-        fontSize={18 * s} fontWeight={800} fill="#1E3A8A"
-        fontFamily="system-ui, -apple-system, sans-serif">{full}</text>
-    </g>
-  )
-}
-
 export interface OverlayProps {
   width: number; height: number
   metersPerPx: number
@@ -178,21 +161,26 @@ export interface OverlayProps {
   selected: Set<string>
   measures: Measure[]
   /** אינטראקטיבי רק ב-Lightbox; הגרסה בדף היא תצוגה בלבד */
-  mode?: 'pan' | 'select' | 'measure' | 'draw' | 'rect'
+  mode?: 'pan' | 'select' | 'measure' | 'draw'
   outlines?: Outline[]
   onToggle?: (osmId: string) => void
   onAddMeasure?: (m: Omit<Measure, 'id'>) => void
   onAddOutline?: (pts: GeoPt[]) => void
-  /** מדווח כמה נקודות יש בשרטוט שבתהליך, כדי שהסרגל יידע להציג
+  /** מדווח כמה נקודות יש בשרטוט שכבר נקבעו, כדי שהסרגל יידע להציג
    *  "סגור פוליגון" ו-Escape יידע לבטל אותו לפני שהוא סוגר משהו אחר */
   onDraftChange?: (n: number) => void
-  /** מדווח החוצה אם יש מדידה תלויה, כדי ש-Escape ידע לבטל רק אותה */
+  /** מדווח החוצה אם יש מיקום-נקודה בתהליך (לפני שחרור), כדי ש-Escape
+   *  ידע לבטל רק אותו */
   onPendingChange?: (pending: boolean) => void
+  /** אורך חי בזמן גרירת קו מדידה, או null כשאין גרירה פעילה. לא מוצג
+   *  ליד הקו עצמו — ההורה מציג אותו במיקום קבוע על המסך, כי מספר שיושב
+   *  צמוד לקו נופל בדיוק מתחת לאצבע שגוררת אותו. */
+  onMeasureLive?: (text: string | null) => void
 }
 
 export default function SketchOverlay({
   width, height, metersPerPx, proj, buildings, selected, measures, outlines = [],
-  mode = 'pan', onToggle, onAddMeasure, onAddOutline, onPendingChange, onDraftChange,
+  mode = 'pan', onToggle, onAddMeasure, onAddOutline, onPendingChange, onDraftChange, onMeasureLive,
 }: OverlayProps) {
   const svgRef = useRef<SVGSVGElement>(null)
   const P = makeProj(proj)
@@ -202,34 +190,13 @@ export default function SketchOverlay({
   const [drag, setDrag] = useState<{ a: [number, number]; b: [number, number] } | null>(null)
   const [cands, setCands] = useState<{ at: [number, number]; ids: string[] } | null>(null)
   const [draft, setDraft] = useState<[number, number][]>([])
-  // מלבן מהיר: 3 לחיצות — שתי הראשונות קובעות קיר אחד (כיוון+אורך),
-  // השלישית קובעת רק את העומק בניצב אליו. הזווית הישרה נכפית במתמטיקה
-  // (היטל על הניצב לקיר) ולא תלויה בדיוק הלחיצה השלישית — 95% מהמבנים
-  // הם מלבנים, וזה חוסך לחיצה אחת וגם מונע פינה רביעית לא-ישרה שנגרמת
-  // ממילימטר של סטייה באצבע.
-  const [rectPts, setRectPts] = useState<[number, number][]>([])   // [] | [P1] | [P1,P2]
-  const [rectDrag, setRectDrag] = useState<[number, number] | null>(null)
-  const interactive = mode === 'select' || mode === 'measure' || mode === 'draw' || mode === 'rect'
+  // נקודה "מורמת" בתהליך מיקום — עוד לא נכנסה ל-draft. נוצרת ב-pointerdown,
+  // עוקבת אחרי האצבע ב-pointermove, ונכנסת ל-draft רק ב-pointerup. זה מה
+  // שנותן את ה"נוגע, רואה X, זז מעט לדייק, משחרר" שביקשנו — לא לחיצה
+  // מיידית שמתחייבת לפני שרואים איפה בכלל היא נוחתת.
+  const [pendingVertex, setPendingVertex] = useState<[number, number] | null>(null)
+  const interactive = mode === 'select' || mode === 'measure' || mode === 'draw'
 
-  function rectCorners(p1: [number, number], p2: [number, number], p3raw: [number, number]) {
-    const ex = p2[0] - p1[0], ey = p2[1] - p1[1]
-    const elen = Math.hypot(ex, ey) || 1
-    const ux = ex / elen, uy = ey / elen
-    const nx = -uy, ny = ux                                     // ניצב ליחידת הקיר
-    const depth = (p3raw[0] - p2[0]) * nx + (p3raw[1] - p2[1]) * ny
-    const p3: [number, number] = [p2[0] + nx * depth, p2[1] + ny * depth]
-    const p4: [number, number] = [p1[0] + nx * depth, p1[1] + ny * depth]
-    return [p1, p2, p3, p4] as [number, number][]
-  }
-  function resetRect() { setRectPts([]); setRectDrag(null); onDraftChange?.(0) }
-
-  // שרטוט הוא לחיצות ולא גרירה: מניחים פינות מדויקות, והגרירה כבר תפוסה
-  // למדידה. closeDraft נחשף כלפי מעלה דרך onDraftChange + מפתח cancelSeq.
-  // עדכון פונקציונלי ולא לפי draft שנתפס בסגירה: כששתי אצבעות של צביטה
-  // נוגעות כמעט בו-זמנית, ה-batching של React יכול להריץ את שני
-  // ה-pointerdown לפני רינדור מחדש ביניהם. אם addVertex/undoVertex היו
-  // קוראים ל-draft הישן, הביטול (undoVertex) שהאצבע השנייה מפעילה היה
-  // מתבסס על המצב שלפני שהראשונה בכלל הוסיפה — ומוחק נקודה נוספת בטעות.
   function addVertex(x: number, y: number) {
     setDraft(prev => {
       const next: [number, number][] = [...prev, [x, y]]
@@ -252,9 +219,6 @@ export default function SketchOverlay({
     })
   }
 
-
-  /** מיקום מצביע → קואורדינטות ה-viewBox. getScreenCTM מטפל בזום/הזזה
-   *  של ה-Lightbox ובכל scale של הדפדפן, ולכן אין כאן חשבון ידני. */
   /** מיקום מצביע/מגע → קואורדינטות ה-viewBox.
    *  getScreenCTM().inverse() היה כאן קודם — תקין תיאורטית, אבל ל-Safari
    *  ב-iOS יש תקלות מתועדות בדיוק בתצורה הזו: SVG בתוך אב עם
@@ -262,8 +226,10 @@ export default function SketchOverlay({
    *  שנקודת המגע נרשמה במקום אחר מהמקום שבו המשתמש נגע — גם בשרטוט
    *  (לחיצות בודדות) וגם במדידה (press+drag+release), כי שניהם עוברים
    *  כאן. getBoundingClientRect + יחס סקאלה מפורש הן הטכניקה הנפוצה
-   *  והעמידה יותר למיפוי מגע על אלמנט מותמר, ולא תלויות במימוש CTM. */
-  function at(e: React.PointerEvent): [number, number] {
+   *  והעמידה יותר למיפוי מגע על אלמנט מותמר, ולא תלויות במימוש CTM.
+   *  liftPx: ראו LIFT_PX למעלה — מוחסר מ-clientY לפני חלוקת קנה-המידה,
+   *  כך שהוא מתורגם לאותה הזחה חזותית בכל רמת זום. */
+  function at(e: React.PointerEvent, liftPx = 0): [number, number] {
     const svg = svgRef.current
     if (!svg) return [0, 0]
     const rect = svg.getBoundingClientRect()
@@ -271,12 +237,6 @@ export default function SketchOverlay({
     // ה-SVG ממשיך "meet" (ברירת המחדל של preserveAspectRatio): כשהקופסה
     // שלו לא זהה ביחס-הממדים ל-viewBox, הוא ממרכז ומצייר את התוכן בתת-
     // מלבן פנימי, לא בכל הקופסה — בדיוק כמו object-fit:contain של התמונה.
-    // עד עכשיו זה לא הזיק כי wrap היה display:inline-block וצומצם לגודל
-    // התמונה עצמה (קופסה מרובעת בפועל). התיקון לגלישה בדסקטופ שינה את
-    // wrap ל-width/height:100% של מסך רחב — קופסה לא-מרובעת — וה-SVG
-    // התחיל למרכז את עצמו בתוכה, בזמן שהחישוב כאן עדיין הניח שכל הקופסה
-    // הרוחבית שווה ל-viewBox. לחיצה ליד הקצוות יצאה מוסטת בדיוק כפי שדווח.
-    // הפתרון: לשחזר ידנית את אותו תת-מלבן ("meet") ולמפות ביחס אליו.
     const boxAspect = rect.width / rect.height
     const vbAspect = width / height
     let visW = rect.width, visH = rect.height, offX = 0, offY = 0
@@ -289,7 +249,7 @@ export default function SketchOverlay({
     }
     return [
       ((e.clientX - rect.left - offX) / visW) * width,
-      ((e.clientY - rect.top - offY) / visH) * height,
+      ((e.clientY - liftPx - rect.top - offY) / visH) * height,
     ]
   }
 
@@ -321,9 +281,7 @@ export default function SketchOverlay({
   // עוזבות ומתחילה נגיעה חדשה ונקייה.
   const activePointers = useRef<Set<number>>(new Set())
   const gestureIsMulti = useRef(false)
-  const lastVertexPointer = useRef<number | null>(null)
   const lastToggledPointer = useRef<{ pointerId: number; osmId: string } | null>(null)
-  const lastRectTapPointer = useRef<number | null>(null)
 
   function onDown(e: React.PointerEvent) {
     if (!interactive) return
@@ -331,51 +289,42 @@ export default function SketchOverlay({
     activePointers.current.add(e.pointerId)
 
     if (activePointers.current.size >= 2) {
-      // הופך לצביטה — מבטלים את מה שהאצבע הראשונה הספיקה לעשות
+      // הופך לצביטה — מבטלים כל מיקום-נקודה שעדיין לא שוחרר, ולא נכנס
+      // ל-state הסופי (draft / קו מדידה), כי הוא לא באמת "בוצע" עדיין
       gestureIsMulti.current = true
-      if (mode === 'draw' && lastVertexPointer.current !== null) { undoVertex(); lastVertexPointer.current = null }
-      if (mode === 'measure' && drag) { setDrag(null); onPendingChange?.(false) }
+      if (mode === 'draw' && pendingVertex) { setPendingVertex(null); onPendingChange?.(false) }
+      if (mode === 'measure' && drag) { setDrag(null); onPendingChange?.(false); onMeasureLive?.(null) }
       if (mode === 'select' && lastToggledPointer.current) { onToggle?.(lastToggledPointer.current.osmId); lastToggledPointer.current = null }
-      if (mode === 'rect') {
-        if (rectDrag) { setRectDrag(null); onPendingChange?.(false) }
-        else if (lastRectTapPointer.current !== null) {
-          setRectPts(prev => { const next = prev.slice(0, -1); onDraftChange?.(next.length); return next })
-          lastRectTapPointer.current = null
-        }
-      }
       return
     }
     if (gestureIsMulti.current) return         // אצבע שנשארה מצביטה קודמת
 
-    const [x, y] = at(e)
     if (mode === 'select') {
+      const [x, y] = at(e)
       const id = pickAt(x, y)
       if (id) lastToggledPointer.current = { pointerId: e.pointerId, osmId: id }
       return
     }
-    if (mode === 'draw') { addVertex(x, y); lastVertexPointer.current = e.pointerId; return }
-    if (mode === 'rect') {
-      if (rectPts.length < 2) {
-        setRectPts(prev => { const next: [number, number][] = [...prev, [x, y]]; onDraftChange?.(next.length); return next })
-        lastRectTapPointer.current = e.pointerId
-        return
-      }
-      // הקיר כבר קבוע — זו תחילת גרירת העומק, עם תצוגה חיה של המלבן
+    if (mode === 'draw') {
       ;(e.target as Element).setPointerCapture?.(e.pointerId)
-      setRectDrag([x, y])
+      setPendingVertex(at(e, LIFT_PX))
       onPendingChange?.(true)
       return
     }
     ;(e.target as Element).setPointerCapture?.(e.pointerId)
-    setDrag({ a: [x, y], b: [x, y] })
+    const p = at(e, LIFT_PX)
+    setDrag({ a: p, b: p })
     onPendingChange?.(true)
+    onMeasureLive?.('0.0 מ׳')
   }
   function onMove(e: React.PointerEvent) {
     if (gestureIsMulti.current) return
-    if (mode === 'rect' && rectDrag) { e.stopPropagation(); setRectDrag(at(e)); return }
+    if (mode === 'draw' && pendingVertex) { e.stopPropagation(); setPendingVertex(at(e, LIFT_PX)); return }
     if (mode !== 'measure' || !drag) return
     e.stopPropagation()
-    setDrag({ a: drag.a, b: at(e) })
+    const b = at(e, LIFT_PX)
+    setDrag({ a: drag.a, b })
+    onMeasureLive?.(`${measureMeters(P.toGeo(drag.a[0], drag.a[1]), P.toGeo(b[0], b[1])).toFixed(1)} מ׳`)
   }
   function endPointer(id: number) {
     activePointers.current.delete(id)
@@ -384,26 +333,25 @@ export default function SketchOverlay({
   function onUp(e: React.PointerEvent) {
     endPointer(e.pointerId)
     if (gestureIsMulti.current) return
-    if (mode === 'rect' && rectDrag && rectPts.length === 2) {
+    if (mode === 'draw' && pendingVertex) {
       e.stopPropagation()
-      const corners = rectCorners(rectPts[0], rectPts[1], at(e))
+      addVertex(pendingVertex[0], pendingVertex[1])
+      setPendingVertex(null)
       onPendingChange?.(false)
-      onAddOutline?.(corners.map(([px, py]) => P.toGeo(px, py)))
-      resetRect()
       return
     }
     if (mode !== 'measure' || !drag) return
     e.stopPropagation()
-    const b = at(e)
+    const b = at(e, LIFT_PX)
     const moved = Math.hypot(b[0] - drag.a[0], b[1] - drag.a[1])
     setDrag(null)
     onPendingChange?.(false)
+    onMeasureLive?.(null)
     if (moved < 4) return                     // נגיעה בלי גרירה — לא קו
     onAddMeasure?.({ a: P.toGeo(drag.a[0], drag.a[1]), b: P.toGeo(b[0], b[1]) })
   }
 
   const candSet = new Set(cands?.ids ?? [])
-  const geoLen = (g1: GeoPt, g2: GeoPt) => `${measureMeters(g1, g2).toFixed(1)} מ׳`
 
   return (
     <>
@@ -412,10 +360,10 @@ export default function SketchOverlay({
           position: 'absolute', inset: 0, width: '100%', height: '100%',
           pointerEvents: interactive ? 'auto' : 'none',
           touchAction: interactive ? 'none' : undefined,
-          cursor: mode === 'select' ? 'pointer' : mode === 'measure' || mode === 'rect' ? 'crosshair' : undefined,
+          cursor: mode === 'select' ? 'pointer' : mode === 'measure' ? 'crosshair' : undefined,
         }}
         onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp}
-        onPointerCancel={e => { endPointer(e.pointerId); setDrag(null); onPendingChange?.(false) }}
+        onPointerCancel={e => { endPointer(e.pointerId); setDrag(null); setPendingVertex(null); onPendingChange?.(false); onMeasureLive?.(null) }}
       >
         {buildings.map(b => {
           if ((b.poly_px?.length ?? 0) < 3) return null
@@ -444,36 +392,21 @@ export default function SketchOverlay({
           )
         })}
 
-        {draft.length > 0 && (
+        {(draft.length > 0 || pendingVertex) && (
           <g>
-            <polyline points={draft.map(q => `${q[0]},${q[1]}`).join(' ')}
-              fill={draft.length > 2 ? OUT_FILL : 'none'} stroke={SEL_STROKE}
-              strokeWidth={2.6 * s} strokeDasharray={`${7 * s} ${5 * s}`} strokeLinejoin="round" />
+            <polyline points={[...draft, ...(pendingVertex ? [pendingVertex] : [])].map(q => `${q[0]},${q[1]}`).join(' ')}
+              fill={draft.length > 1 && pendingVertex ? OUT_FILL : draft.length > 2 ? OUT_FILL : 'none'}
+              stroke={SEL_STROKE} strokeWidth={2.6 * s} strokeDasharray={`${7 * s} ${5 * s}`} strokeLinejoin="round" />
             {draft.map((q, i) => (
               <circle key={i} cx={q[0]} cy={q[1]} r={5 * s} fill="#fff"
                 stroke={SEL_STROKE} strokeWidth={2 * s} />
             ))}
-          </g>
-        )}
-
-        {/* מלבן מהיר — קיר קבוע אחרי 2 לחיצות, ותצוגה חיה בזמן גרירת העומק */}
-        {rectPts.length > 0 && (
-          <g>
-            {rectPts.length === 2 && !rectDrag && (
-              <line x1={rectPts[0][0]} y1={rectPts[0][1]} x2={rectPts[1][0]} y2={rectPts[1][1]}
-                stroke={SEL_STROKE} strokeWidth={2.6 * s} strokeLinecap="round" />
+            {/* הנקודה המורמת — עדיין לא מוצבת, רק תצוגה של איפה שהיא תיפול
+                אם משחררים עכשיו. חלולה/מקווקוות כדי שתיראה אחרת מהמוצבות. */}
+            {pendingVertex && (
+              <circle cx={pendingVertex[0]} cy={pendingVertex[1]} r={9 * s} fill="rgba(185,28,28,0.18)"
+                stroke={SEL_STROKE} strokeWidth={2.4 * s} strokeDasharray={`${3 * s} ${3 * s}`} />
             )}
-            {rectPts.length === 2 && rectDrag && (() => {
-              const c = rectCorners(rectPts[0], rectPts[1], rectDrag)
-              return (
-                <polygon points={c.map(q => `${q[0]},${q[1]}`).join(' ')}
-                  fill={OUT_FILL} stroke={SEL_STROKE} strokeWidth={2.6 * s}
-                  strokeDasharray={`${7 * s} ${5 * s}`} strokeLinejoin="round" />
-              )
-            })()}
-            {rectPts.map((q, i) => (
-              <circle key={i} cx={q[0]} cy={q[1]} r={5 * s} fill="#fff" stroke={SEL_STROKE} strokeWidth={2 * s} />
-            ))}
           </g>
         )}
 
@@ -483,7 +416,6 @@ export default function SketchOverlay({
             <g key={m.id}>
               <line x1={ax} y1={ay} x2={bx} y2={by} stroke={MEAS} strokeWidth={2.5 * s} strokeLinecap="round" />
               <circle cx={ax} cy={ay} r={4 * s} fill={MEAS} stroke="#fff" strokeWidth={1.4 * s} />
-              <MeasureLabel ax={ax} ay={ay} bx={bx} by={by} s={s} text={geoLen(m.a, m.b)} />
               <BuildingTag x={bx} y={by} n={i + 1} s={s} />
             </g>
           )
@@ -494,9 +426,8 @@ export default function SketchOverlay({
             <line x1={drag.a[0]} y1={drag.a[1]} x2={drag.b[0]} y2={drag.b[1]}
               stroke={MEAS} strokeWidth={2.5 * s} strokeDasharray={`${7 * s} ${5 * s}`} strokeLinecap="round" />
             <circle cx={drag.a[0]} cy={drag.a[1]} r={3.5 * s} fill={MEAS} stroke="#fff" strokeWidth={1.2 * s} />
-            <MeasureLabel ax={drag.a[0]} ay={drag.a[1]} bx={drag.b[0]} by={drag.b[1]} s={s}
-              text={geoLen(P.toGeo(drag.a[0], drag.a[1]), P.toGeo(drag.b[0], drag.b[1]))} />
-            <BuildingTag x={drag.b[0]} y={drag.b[1]} n={measures.length + 1} s={s} />
+            <circle cx={drag.b[0]} cy={drag.b[1]} r={9 * s} fill="rgba(37,99,235,0.18)"
+              stroke={MEAS} strokeWidth={2.4 * s} strokeDasharray={`${3 * s} ${3 * s}`} />
           </g>
         )}
       </svg>
@@ -511,7 +442,7 @@ export default function SketchOverlay({
           gap: 8, justifyContent: 'center', flexWrap: 'wrap', direction: 'rtl', zIndex: 6 }}>
           <span style={{ background: 'rgba(0,0,0,0.75)', color: '#fff', fontSize: 12.5,
             fontWeight: 700, padding: '6px 11px', borderRadius: 16 }}>
-            {draft.length === 0 ? 'לחץ על פינות המבנה'
+            {draft.length === 0 ? 'גע בכל פינה של המבנה'
               : `${draft.length} נקודות${draft.length < 3 ? ' — צריך לפחות 3' : ''}`}
           </span>
           {draft.length > 0 && (
