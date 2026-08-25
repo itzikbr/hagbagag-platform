@@ -1652,7 +1652,7 @@ function Lightbox({ src, onClose, res, selected, measures, outlines, onToggle, o
 
       <div style={{ textAlign: 'center', color: 'rgba(255,255,255,0.75)', fontSize: 12, padding: '0 12px 12px' }}>
         {mode === 'draw' && 'גע בכל פינה, זוז מעט לדייק ואז שחרר — ואז "סגור פוליגון" · Escape מבטל'}
-        {mode === 'measure' && 'התחל מהמבנה שלך וגרור אל השכן — התג מ1, מ2 מונח בנקודת השחרור'}
+        {mode === 'measure' && 'גע במבנה שלך, זוז מעט לדייק ושחרר — ואז אותו דבר על השכן · שתי נגיעות נפרדות לקו'}
         {mode === 'pan' && 'גלגלת או צביטה · + / − / 0 במקלדת · גרירה להזזה · לחיצה כפולה למעבר מהיר · טווח 0.25×–8×'}
       </div>
       </div>

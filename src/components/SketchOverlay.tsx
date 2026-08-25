@@ -8,7 +8,7 @@
 // ה-viewBox הוא גודל התמונה המקורית (1900×1900), ולכן אין כאן שום חישוב
 // קנה מידה: הדפדפן מתאים את אותם pixel coordinates גם למסך מלא וגם
 // לתמונה ברוחב 430px.
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 export interface GeoPt { lat: number; lon: number }
 export interface Measure { id: string; a: GeoPt; b: GeoPt; name?: string }
@@ -187,15 +187,24 @@ export default function SketchOverlay({
   // s מנרמל עובי קו וגופן לגודל התמונה, כדי שסימון ייראה זהה בכל מקור
   const s = width / 950
 
-  const [drag, setDrag] = useState<{ a: [number, number]; b: [number, number] } | null>(null)
   const [cands, setCands] = useState<{ at: [number, number]; ids: string[] } | null>(null)
   const [draft, setDraft] = useState<[number, number][]>([])
-  // נקודה "מורמת" בתהליך מיקום — עוד לא נכנסה ל-draft. נוצרת ב-pointerdown,
-  // עוקבת אחרי האצבע ב-pointermove, ונכנסת ל-draft רק ב-pointerup. זה מה
-  // שנותן את ה"נוגע, רואה X, זז מעט לדייק, משחרר" שביקשנו — לא לחיצה
-  // מיידית שמתחייבת לפני שרואים איפה בכלל היא נוחתת.
+  // נקודה "מורמת" בתהליך מיקום — עדיין לא אושרה (לא ל-draft, לא ל-measureA,
+  // לא למדידה שלמה). נוצרת ב-pointerdown, עוקבת אחרי האצבע ב-pointermove,
+  // ומתחייבת רק ב-pointerup. זה מה שנותן את ה"נוגע, רואה X, זז מעט לדייק,
+  // משחרר" שביקשנו — לא לחיצה מיידית שמתחייבת לפני שרואים איפה היא נוחתת.
+  // אותו state משרת גם שרטוט מבנה וגם את שתי הנקודות של קו מדידה — ההקשר
+  // (mode + measureA) קובע ל-onUp לאן הנקודה המאושרת הולכת.
   const [pendingVertex, setPendingVertex] = useState<[number, number] | null>(null)
+  // הנקודה הראשונה של קו מדידה שכבר אושרה בנגיעה נפרדת, וממתינה לשנייה.
+  // בלי זה, "מדידה" הייתה גרירה רציפה אחת שבה רק הקצה השני מדויק — הקצה
+  // הראשון נקבע מיד עם המגע בלי הזדמנות לתקן אותו.
+  const [measureA, setMeasureA] = useState<[number, number] | null>(null)
   const interactive = mode === 'select' || mode === 'measure' || mode === 'draw'
+
+  // עזיבת מצב מדידה (מעבר ל-pan, חזרה לשלב 1...) לא צריכה להשאיר נקודת
+  // התחלה תלויה בזיכרון: בפעם הבאה שנכנסים ל-measure זו התחלה נקייה.
+  useEffect(() => { if (mode !== 'measure') { setMeasureA(null); setPendingVertex(null) } }, [mode])
 
   function addVertex(x: number, y: number) {
     setDraft(prev => {
@@ -290,10 +299,10 @@ export default function SketchOverlay({
 
     if (activePointers.current.size >= 2) {
       // הופך לצביטה — מבטלים כל מיקום-נקודה שעדיין לא שוחרר, ולא נכנס
-      // ל-state הסופי (draft / קו מדידה), כי הוא לא באמת "בוצע" עדיין
+      // ל-state הסופי (draft / נקודת מדידה), כי הוא לא באמת "בוצע" עדיין.
+      // measureA שכבר אושרה בנגיעה קודמת לא מתבטלת — רק מה שבאמצע.
       gestureIsMulti.current = true
-      if (mode === 'draw' && pendingVertex) { setPendingVertex(null); onPendingChange?.(false) }
-      if (mode === 'measure' && drag) { setDrag(null); onPendingChange?.(false); onMeasureLive?.(null) }
+      if (pendingVertex) { setPendingVertex(null); onPendingChange?.(false); onMeasureLive?.(null) }
       if (mode === 'select' && lastToggledPointer.current) { onToggle?.(lastToggledPointer.current.osmId); lastToggledPointer.current = null }
       return
     }
@@ -305,26 +314,29 @@ export default function SketchOverlay({
       if (id) lastToggledPointer.current = { pointerId: e.pointerId, osmId: id }
       return
     }
-    if (mode === 'draw') {
+    if (mode === 'draw' || mode === 'measure') {
+      // אותה טכניקה בשני המצבים: נוגעים, רואים נקודה מורמת, מדייקים,
+      // משחררים לקביעה. במדידה יש שתי נגיעות נפרדות — אחת לכל קצה —
+      // ולא גרירה רציפה אחת שבה רק הקצה השני מדויק.
       ;(e.target as Element).setPointerCapture?.(e.pointerId)
-      setPendingVertex(at(e, LIFT_PX))
+      const p = at(e, LIFT_PX)
+      setPendingVertex(p)
       onPendingChange?.(true)
+      if (mode === 'measure' && measureA) {
+        onMeasureLive?.(`${measureMeters(P.toGeo(measureA[0], measureA[1]), P.toGeo(p[0], p[1])).toFixed(1)} מ׳`)
+      }
       return
     }
-    ;(e.target as Element).setPointerCapture?.(e.pointerId)
-    const p = at(e, LIFT_PX)
-    setDrag({ a: p, b: p })
-    onPendingChange?.(true)
-    onMeasureLive?.('0.0 מ׳')
   }
   function onMove(e: React.PointerEvent) {
     if (gestureIsMulti.current) return
-    if (mode === 'draw' && pendingVertex) { e.stopPropagation(); setPendingVertex(at(e, LIFT_PX)); return }
-    if (mode !== 'measure' || !drag) return
+    if (!pendingVertex) return
     e.stopPropagation()
-    const b = at(e, LIFT_PX)
-    setDrag({ a: drag.a, b })
-    onMeasureLive?.(`${measureMeters(P.toGeo(drag.a[0], drag.a[1]), P.toGeo(b[0], b[1])).toFixed(1)} מ׳`)
+    const p = at(e, LIFT_PX)
+    setPendingVertex(p)
+    if (mode === 'measure' && measureA) {
+      onMeasureLive?.(`${measureMeters(P.toGeo(measureA[0], measureA[1]), P.toGeo(p[0], p[1])).toFixed(1)} מ׳`)
+    }
   }
   function endPointer(id: number) {
     activePointers.current.delete(id)
@@ -333,22 +345,28 @@ export default function SketchOverlay({
   function onUp(e: React.PointerEvent) {
     endPointer(e.pointerId)
     if (gestureIsMulti.current) return
-    if (mode === 'draw' && pendingVertex) {
-      e.stopPropagation()
+    if (!pendingVertex) return
+    e.stopPropagation()
+    if (mode === 'draw') {
       addVertex(pendingVertex[0], pendingVertex[1])
       setPendingVertex(null)
       onPendingChange?.(false)
       return
     }
-    if (mode !== 'measure' || !drag) return
-    e.stopPropagation()
-    const b = at(e, LIFT_PX)
-    const moved = Math.hypot(b[0] - drag.a[0], b[1] - drag.a[1])
-    setDrag(null)
-    onPendingChange?.(false)
-    onMeasureLive?.(null)
-    if (moved < 4) return                     // נגיעה בלי גרירה — לא קו
-    onAddMeasure?.({ a: P.toGeo(drag.a[0], drag.a[1]), b: P.toGeo(b[0], b[1]) })
+    if (mode === 'measure') {
+      if (!measureA) {
+        // נגיעה ראשונה אושרה — עכשיו מחכים לנגיעה השנייה, לא מסיימים כאן
+        setMeasureA(pendingVertex)
+        setPendingVertex(null)
+        onPendingChange?.(false)
+        return
+      }
+      onAddMeasure?.({ a: P.toGeo(measureA[0], measureA[1]), b: P.toGeo(pendingVertex[0], pendingVertex[1]) })
+      setMeasureA(null)
+      setPendingVertex(null)
+      onPendingChange?.(false)
+      onMeasureLive?.(null)
+    }
   }
 
   const candSet = new Set(cands?.ids ?? [])
@@ -363,7 +381,7 @@ export default function SketchOverlay({
           cursor: mode === 'select' ? 'pointer' : mode === 'measure' ? 'crosshair' : undefined,
         }}
         onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp}
-        onPointerCancel={e => { endPointer(e.pointerId); setDrag(null); setPendingVertex(null); onPendingChange?.(false); onMeasureLive?.(null) }}
+        onPointerCancel={e => { endPointer(e.pointerId); setPendingVertex(null); onPendingChange?.(false); onMeasureLive?.(null) }}
       >
         {buildings.map(b => {
           if ((b.poly_px?.length ?? 0) < 3) return null
@@ -392,7 +410,7 @@ export default function SketchOverlay({
           )
         })}
 
-        {(draft.length > 0 || pendingVertex) && (
+        {mode === 'draw' && (draft.length > 0 || pendingVertex) && (
           <g>
             <polyline points={[...draft, ...(pendingVertex ? [pendingVertex] : [])].map(q => `${q[0]},${q[1]}`).join(' ')}
               fill={draft.length > 1 && pendingVertex ? OUT_FILL : draft.length > 2 ? OUT_FILL : 'none'}
@@ -421,13 +439,22 @@ export default function SketchOverlay({
           )
         })}
 
-        {drag && (
+        {/* מדידה: שתי נגיעות נפרדות. measureA היא הנקודה הראשונה שכבר
+            אושרה; pendingVertex היא הנקודה שנוגעים בה עכשיו (או הראשונה,
+            עוד לפני שאושרה, או השנייה תוך כדי דיוק). */}
+        {mode === 'measure' && (measureA || pendingVertex) && (
           <g>
-            <line x1={drag.a[0]} y1={drag.a[1]} x2={drag.b[0]} y2={drag.b[1]}
-              stroke={MEAS} strokeWidth={2.5 * s} strokeDasharray={`${7 * s} ${5 * s}`} strokeLinecap="round" />
-            <circle cx={drag.a[0]} cy={drag.a[1]} r={3.5 * s} fill={MEAS} stroke="#fff" strokeWidth={1.2 * s} />
-            <circle cx={drag.b[0]} cy={drag.b[1]} r={9 * s} fill="rgba(37,99,235,0.18)"
-              stroke={MEAS} strokeWidth={2.4 * s} strokeDasharray={`${3 * s} ${3 * s}`} />
+            {measureA && pendingVertex && (
+              <line x1={measureA[0]} y1={measureA[1]} x2={pendingVertex[0]} y2={pendingVertex[1]}
+                stroke={MEAS} strokeWidth={2.5 * s} strokeDasharray={`${7 * s} ${5 * s}`} strokeLinecap="round" />
+            )}
+            {measureA && (
+              <circle cx={measureA[0]} cy={measureA[1]} r={4 * s} fill={MEAS} stroke="#fff" strokeWidth={1.4 * s} />
+            )}
+            {pendingVertex && (
+              <circle cx={pendingVertex[0]} cy={pendingVertex[1]} r={9 * s} fill="rgba(37,99,235,0.18)"
+                stroke={MEAS} strokeWidth={2.4 * s} strokeDasharray={`${3 * s} ${3 * s}`} />
+            )}
           </g>
         )}
       </svg>
@@ -451,6 +478,17 @@ export default function SketchOverlay({
           {draft.length >= 3 && (
             <button type="button" onClick={closeDraft} style={drawBtn(true)}>✓ סגור פוליגון</button>
           )}
+        </div>
+      )}
+
+      {mode === 'measure' && measureA && !pendingVertex && (
+        // ממתינים לנגיעה השנייה. כפתור ביטול נגיש בלי מקלדת — Escape לא
+        // קיים בנייד, וזו נקודה מאושרת שממתינה, לא רק תצוגה חולפת.
+        <div style={{ position: 'absolute', top: 58, left: 0, right: 0, display: 'flex',
+          gap: 8, justifyContent: 'center', flexWrap: 'wrap', direction: 'rtl', zIndex: 6 }}>
+          <span style={{ background: 'rgba(0,0,0,0.75)', color: '#fff', fontSize: 12.5,
+            fontWeight: 700, padding: '6px 11px', borderRadius: 16 }}>גע במבנה השכן</span>
+          <button type="button" onClick={() => setMeasureA(null)} style={drawBtn(false)}>✕ בטל</button>
         </div>
       )}
 
