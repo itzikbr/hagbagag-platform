@@ -185,6 +185,16 @@ export default function MirchakimScreen() {
   const asbTableRef = useRef<HTMLDivElement>(null)
   const [zoomOpen, setZoomOpen] = useState(false)
   const [radiusM, setRadiusM] = useState('')
+  // תזכורת חד-פעמית שהשטח מולא אוטומטית מהשרטוט — נעלמת לבד, לא בלוק קבוע.
+  // הטיימר מתחיל רק כשהלייטבוקס נסגר (לא ברגע היצירה): היא נוצרת בזמן
+  // שהלייטבוקס עדיין פתוח במסך מלא, ואם הטיימר היה רץ מיד היא הייתה
+  // נעלמת מאחורי מסך שחור לפני שהמשתמש בכלל יכול לראות אותה.
+  const [areaHint, setAreaHint] = useState<string | null>(null)
+  useEffect(() => {
+    if (zoomOpen || !areaHint) return
+    const t = setTimeout(() => setAreaHint(null), 5000)
+    return () => clearTimeout(t)
+  }, [zoomOpen, areaHint])
 
   // ── שכבת סימון: מבנים נבחרים + קווי מדידה ──
   // מבנים לפי osm_id (יציב) ולא לפי אינדקס, וקווים ב-lat/lon ולא בפיקסלים —
@@ -197,7 +207,17 @@ export default function MirchakimScreen() {
     // שורה בטבלת "מבנים עם אסבסט" ברגע שהמתאר נסגר, לא רק כשלוחצים
     // "✓ סיום · למבנים" — אחרת מי שעובר ישר למדידת מרחקים (ומסיים דרך
     // הכפתור של המדידה) משאיר את הטבלה על 0 בלי לשים לב שהיא לא התמלאה.
-    setAsbRows(rs => (rs.length > outlines.length ? rs : [...rs, emptyAsbRow()]))
+    // שדה השטח מתמלא מראש מהיטל המתאר — אבל נשאר טקסט רגיל, ניתן לעריכה
+    // לגמרי, לא נעול: ההיטל האופקי מהתצלום קטן משטח הגג האמיתי (גג
+    // משופע), אז זו הצעת פתיחה לתיקון, לא קביעה.
+    const area = Math.round(outlineArea(pts))
+    setAsbRows(rs => {
+      if (rs.length > outlines.length) return rs
+      const row = emptyAsbRow()
+      row.roofSize = String(area)
+      return [...rs, row]
+    })
+    setAreaHint(`שטח ${fmtNum(area)} מ"ר מולא אוטומטית מהשרטוט בטבלת המבנים — גג משופע עשוי להיות גדול יותר בפועל, בדוק ועדכן אם צריך.`)
     setFormDirty(true)
   }
   const toggleBuilding = (id: string) => {
@@ -852,17 +872,19 @@ export default function MirchakimScreen() {
             )}
             </>)}
 
-            {/* ── סוג היתר (לא נכנס להדפסה — הסוג מופיע בכותרת) ── */}
-            <div className="no-print">
-              <PermitSection value={permitType}
-                onChange={v => { setPermitType(v); setFormDirty(true) }}
-                infoOpen={infoOpen} setInfoOpen={setInfoOpen} />
-            </div>
-
-            {/* ── טבלה 1: מבנים עם אסבסט ── */}
+            {/* ── טבלה 1: מבנים עם אסבסט ──
+                מיד אחרי התצלום, לפני סוג ההיתר וההסברים — אחרי שסוגרים את
+                הלייטבוקס רוצים לראות מיד את התוצאה של הסימון, לא לגלול
+                דרך בורר סוג היתר כדי להגיע אליה. */}
             <div ref={asbTableRef}>
             <Section title="מבנים עם אסבסט" badge={String(asbRows.length)}
               action={<EditToggle on={editAsb} onClick={() => setEditAsb(!editAsb)} />}>
+              {areaHint && (
+                <div className="no-print" style={{ margin: '8px 12px 0', padding: '7px 10px', borderRadius: 8,
+                  fontSize: 12, lineHeight: 1.5, background: '#EEF2FF', border: '1px solid #C7D2FE', color: '#1A3E7A' }}>
+                  ℹ️ {areaHint}
+                </div>
+              )}
               {asbRows.length > 0 && (() => {
                 const counts = asbRows.reduce<Record<string, number>>((a, r) => {
                   const c = effectiveClass(r); a[c.label] = (a[c.label] ?? 0) + 1; return a }, {})
@@ -1079,6 +1101,14 @@ export default function MirchakimScreen() {
               </div>
             )}
 
+            {/* ── סוג היתר (לא נכנס להדפסה — הסוג מופיע בכותרת) ──
+                אחרי שתי הטבלאות בכוונה: זה הסבר/הגדרה, לא תוצאה של הסימון,
+                ואחרי שסוגרים לייטבוקס רוצים לראות קודם מה סומן בפועל. */}
+            <div className="no-print">
+              <PermitSection value={permitType}
+                onChange={v => { setPermitType(v); setFormDirty(true) }}
+                infoOpen={infoOpen} setInfoOpen={setInfoOpen} />
+            </div>
 
             {/* ── מבני ציבור (לא נכנס להדפסה לפי המפרט) ── */}
             {res && (

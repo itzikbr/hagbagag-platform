@@ -136,19 +136,19 @@ function BuildingTag({ x, y, n, s }: { x: number; y: number; n: number; s: numbe
   )
 }
 
-/** תג מתאר משורטט — אדום וממוספר 1,2,3. הפרדת צבע מכוונת: אדום = מבנה
- *  אסבסט (כמו בטבלה שלו), כחול מ1/מ2 = שכן. שתי מערכות מספור על אותה
- *  סקיצה מתבלבלות בלי הפרדה ויזואלית. */
-function OutlineTag({ x, y, n, area, s }: { x: number; y: number; n: number; area: number; s: number }) {
-  const txt = `${n} · ${Math.round(area).toLocaleString('he-IL')} מ״ר`
-  const w = txt.length * 11 * s + 16 * s, h = 26 * s
+/** תג מתאר משורטט — עיגול אדום ממוספר 1,2,3, בלי שטח עליו. הפרדת צבע
+ *  מכוונת: אדום = מבנה אסבסט (כמו בטבלה שלו), כחול מ1/מ2 = שכן. השטח
+ *  היה כאן קודם, אבל תג רחב עם מספרים תפס בדיוק את פינות המבנה שצריך
+ *  לגעת בהן כדי לשרטט אותו — והשטח כבר נכנס לטבלה בעריכה, זה מיותר
+ *  שיישב פעמיים על אותו מסך. */
+function OutlineTag({ x, y, n, s }: { x: number; y: number; n: number; s: number }) {
+  const r = 13 * s
   return (
     <g>
-      <rect x={x - w / 2} y={y - h / 2} width={w} height={h} rx={5 * s}
-        fill="rgba(255,255,255,0.93)" stroke={SEL_STROKE} strokeWidth={1.6 * s} />
+      <circle cx={x} cy={y} r={r} fill="#fff" stroke={SEL_STROKE} strokeWidth={2.2 * s} />
       <text x={x} y={y} textAnchor="middle" dominantBaseline="central"
-        fontSize={15 * s} fontWeight={800} fill="#8E1B27"
-        fontFamily="system-ui, -apple-system, sans-serif">{txt}</text>
+        fontSize={14 * s} fontWeight={800} fill="#8E1B27"
+        fontFamily="system-ui, -apple-system, sans-serif">{n}</text>
     </g>
   )
 }
@@ -405,7 +405,7 @@ export default function SketchOverlay({
             <g key={o.id}>
               <polygon points={pts.map(q => `${q[0]},${q[1]}`).join(' ')}
                 fill={OUT_FILL} stroke={SEL_STROKE} strokeWidth={2.6 * s} strokeLinejoin="round" />
-              <OutlineTag x={cx2} y={cy2} n={i + 1} area={outlineArea(o.pts)} s={s} />
+              <OutlineTag x={cx2} y={cy2} n={i + 1} s={s} />
             </g>
           )
         })}
