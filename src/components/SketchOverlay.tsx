@@ -69,6 +69,13 @@ export const MEAS = '#2563EB'
  *  שתיראה זהה בכל רמת זום — ב-at() היא מופחתת לפני חלוקת קנה-המידה. */
 const LIFT_PX = 46
 
+/** ההרמה רלוונטית רק לאצבע — עכבר/עט מסמנים בדיוק תחת החוד שלהם, בלי
+ *  שום דבר שמכסה אותו, אז הרמה בעכבר רק מזיזה את הנקודה משם שבאמת
+ *  הצביעו אליו. דווח ישירות: "הנקודות ממש לא מדויקות" בעבודה מהמחשב. */
+function lift(e: React.PointerEvent): number {
+  return e.pointerType === 'touch' ? LIFT_PX : 0
+}
+
 /** היטל דו-כיווני מהמתאר שהשרת מחזיר. שתי כפולות לכל כיוון — לא מימוש
  *  Web Mercator שני. השרת הוא מקור האמת (ראו compose() ב-engine.py). */
 export function makeProj(p: Proj) {
@@ -319,7 +326,7 @@ export default function SketchOverlay({
       // משחררים לקביעה. במדידה יש שתי נגיעות נפרדות — אחת לכל קצה —
       // ולא גרירה רציפה אחת שבה רק הקצה השני מדויק.
       ;(e.target as Element).setPointerCapture?.(e.pointerId)
-      const p = at(e, LIFT_PX)
+      const p = at(e, lift(e))
       setPendingVertex(p)
       onPendingChange?.(true)
       if (mode === 'measure' && measureA) {
@@ -332,7 +339,7 @@ export default function SketchOverlay({
     if (gestureIsMulti.current) return
     if (!pendingVertex) return
     e.stopPropagation()
-    const p = at(e, LIFT_PX)
+    const p = at(e, lift(e))
     setPendingVertex(p)
     if (mode === 'measure' && measureA) {
       onMeasureLive?.(`${measureMeters(P.toGeo(measureA[0], measureA[1]), P.toGeo(p[0], p[1])).toFixed(1)} מ׳`)
